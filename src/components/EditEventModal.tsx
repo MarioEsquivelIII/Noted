@@ -30,7 +30,7 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
     onSave({ ...event, title, date, startTime, endTime, color });
   };
 
-  const colors: CalendarEvent["color"][] = ["green", "blue", "orange", "red", "purple", "gray"];
+  const colors: CalendarEvent["color"][] = ["green", "blue", "orange", "red", "purple", "gray", "teal", "yellow", "pink"];
   const colorDisplay: Record<string, string> = {
     green: "bg-[#5a8a4a]",
     blue: "bg-[#4a7a8a]",
@@ -38,6 +38,9 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
     red: "bg-[#8a4a4a]",
     purple: "bg-[#7a5a8a]",
     gray: "bg-[#6a6a6a]",
+    teal: "bg-[#4a8a82]",
+    yellow: "bg-[#a08c32]",
+    pink: "bg-[#a05078]",
   };
 
   return (

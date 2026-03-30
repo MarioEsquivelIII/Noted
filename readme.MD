@@ -2,7 +2,7 @@
 
 **You name it. Noted builds it.**
 
-Noted is an AI-powered calendar builder: when you have an idea, you mention it to the chat — it hears you out, updates your calendar, and your answer is *Noted.* That’s the name.
+Noted is an AI-powered calendar builder: when you have an idea, you mention it to the chat — it hears you out, updates your calendar, and your answer is *Noted.* That's the name.
 
 It turns natural-language descriptions into structured, editable weekly calendars. Instead of manually creating every time block, you describe the schedule you want and Noted generates it for you. You can then visually edit the calendar, refine it with follow-up prompts, and sync with Google Calendar.
 
@@ -13,15 +13,21 @@ It turns natural-language descriptions into structured, editable weekly calendar
 - Generate weekly calendars from natural-language descriptions
 - Upload an image of a schedule or timetable and have it converted to events
 - Voice input via Web Speech API
-- Visual weekly, daily, and monthly calendar views
-- Drag-to-create, drag-to-move, and resize events
-- Inline event editing with a detail panel and edit modal
+- Visual weekly, daily, and monthly calendar views (full 24-hour grid, Sunday-first)
+- Drag-to-create and drag-to-move events with 15-minute snapping
+- Google Calendar-style overlap layout (side-by-side for same start time, indent for partial overlap)
+- Inline event editing with a Notion-style detail panel and edit modal
 - Right-click context menu for quick event actions
 - Follow-up chat prompts to add, move, or remove events without starting over
 - Recurring event support (e.g. "gym every weekday for 4 weeks")
-- Google Calendar import with conflict resolution (merge or overwrite)
-- Light and dark theme
+- Google Calendar import with calendar selection, conflict resolution (merge or overwrite), and color preservation
+- Interactive Mapbox map view showing event locations with walking routes
+- Copy-to-clipboard for AI-drafted availability emails
+- Multiple image upload support in chat
+- 9 event colors: green, blue, orange, red, purple, gray, teal, yellow, pink
+- Light and dark theme with glass-morphism UI
 - Secure authentication with Supabase (email/password and Google OAuth)
+- Event persistence in Supabase (per-user, with Row-Level Security)
 - Guest fallback via localStorage when no Supabase session exists
 
 ---
@@ -40,9 +46,10 @@ Noted converts that into a structured weekly calendar inside the app.
 |---|---|
 | Framework | Next.js 16 (App Router), React 19, TypeScript 5 |
 | Styling | Tailwind CSS 4 |
-| Auth | Supabase (`@supabase/supabase-js`, `@supabase/ssr`) |
+| Auth + DB | Supabase (`@supabase/supabase-js`, `@supabase/ssr`) |
 | AI | OpenAI SDK — `gpt-4o-mini` (text), `gpt-4o` (image input) |
-| State | React `useState` in-memory + `sessionStorage` |
+| Maps | Mapbox GL JS |
+| State | React `useState` + Supabase persistence |
 
 ---
 
@@ -50,10 +57,11 @@ Noted converts that into a structured weekly calendar inside the app.
 
 1. The user enters a natural-language description or uploads a schedule image.
 2. The request is sent to the Next.js API route with the current event context.
-3. The API route calls OpenAI and returns structured JSON calendar actions.
+3. The API route calls OpenAI and returns structured JSON calendar actions (with optional location data).
 4. The frontend parses the actions (add, delete, recurring) and updates the calendar.
-5. The weekly schedule is rendered visually in the app.
-6. The user can manually edit events or refine the schedule with another prompt.
+5. Events are persisted to Supabase in real time (or localStorage for guests).
+6. The weekly schedule is rendered visually in the app.
+7. The user can manually edit events, refine with another prompt, or sync from Google Calendar.
 
 ---
 
@@ -62,8 +70,9 @@ Noted converts that into a structured weekly calendar inside the app.
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18 or later)
-- A [Supabase](https://supabase.com/) project (for authentication)
+- A [Supabase](https://supabase.com/) project (for authentication and event storage)
 - An [OpenAI](https://platform.openai.com/) API key
+- (Optional) A [Mapbox](https://www.mapbox.com/) access token for the map view
 
 ### Installation
 
@@ -86,15 +95,29 @@ Noted converts that into a structured weekly calendar inside the app.
    NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
    OPENAI_API_KEY=your_openai_api_key
+   NEXT_PUBLIC_MAPBOX_TOKEN=your_mapbox_token  # optional
    ```
 
-4. Start the development server:
+4. Set up the database — run the SQL in `supabase/migrations/001_create_events_table.sql` in your Supabase SQL Editor. This creates the `events` table with Row-Level Security policies.
+
+5. Start the development server:
 
    ```bash
    npm run dev
    ```
 
    The app will be available at [http://localhost:3000](http://localhost:3000).
+
+### Supabase Configuration
+
+In your Supabase Dashboard > Authentication > URL Configuration:
+
+- **Site URL:** Your production URL (e.g. `https://noted-calendar.vercel.app/`)
+- **Redirect URLs:** Add both:
+  - `http://localhost:3000/auth/callback`
+  - `https://your-production-domain.com/auth/callback`
+
+For Google Calendar sync, ensure Google OAuth is configured in Supabase > Authentication > Providers > Google, with `calendar.readonly` scope enabled.
 
 ---
 
@@ -104,29 +127,33 @@ Noted converts that into a structured weekly calendar inside the app.
 Kronos/
 ├── src/
 │   ├── app/
-│   │   ├── api/chat/route.ts        # OpenAI API route (AI layer)
-│   │   ├── home/page.tsx            # Main experience: events state lives here
-│   │   ├── login/page.tsx           # Email/password + Google OAuth sign-in
-│   │   ├── signup/page.tsx          # Registration with email verification
-│   │   ├── forgot-password/page.tsx # Password reset request
-│   │   ├── reset-password/page.tsx  # Set new password
-│   │   ├── account/page.tsx         # Profile, theme toggle, Google Calendar sync
-│   │   └── auth/callback/route.ts   # Supabase OAuth callback
+│   │   ├── api/
+│   │   │   ├── chat/route.ts           # OpenAI API route (AI layer)
+│   │   │   └── events/route.ts         # Event CRUD API (GET/POST/PUT/DELETE)
+│   │   ├── home/page.tsx               # Main experience: events state + persistence
+│   │   ├── login/page.tsx              # Email/password + Google OAuth sign-in
+│   │   ├── signup/page.tsx             # Registration with email verification
+│   │   ├── account/page.tsx            # Profile, Google Calendar sync
+│   │   └── auth/callback/route.ts      # Supabase OAuth callback
 │   ├── components/
-│   │   ├── WeekCalendar.tsx         # Week/day/month grid with drag/resize/create
-│   │   ├── ComingUp.tsx             # Upcoming events list (home view)
-│   │   ├── ChatBar.tsx              # Expandable chat UI with voice + image input
-│   │   ├── EditEventModal.tsx       # Event editing modal
-│   │   ├── EventContextMenu.tsx     # Right-click event actions
-│   │   ├── EventDetailPanel.tsx     # Notion-style inline event editor
-│   │   └── GoogleCalendarSyncFlow.tsx # Multi-step Google Calendar import dialog
+│   │   ├── WeekCalendar.tsx            # Week/day/month grid with drag/resize/create
+│   │   ├── MapView.tsx                 # Mapbox map with event locations + walking routes
+│   │   ├── ComingUp.tsx                # Upcoming events list (overview tab)
+│   │   ├── ChatBar.tsx                 # Chat UI with voice, multi-image, copy-to-clipboard
+│   │   ├── EditEventModal.tsx          # Event editing modal
+│   │   ├── EventContextMenu.tsx        # Right-click event actions
+│   │   ├── EventDetailPanel.tsx        # Notion-style inline event editor with meal suggestions
+│   │   └── GoogleCalendarSyncFlow.tsx  # Multi-step Google Calendar import dialog
 │   ├── lib/
-│   │   ├── events.ts               # CalendarEvent type + sample data
-│   │   ├── chat.ts                  # Chat types + offline parse helpers
-│   │   ├── gcalSync.ts             # Google Calendar fetch, parse, conflict resolution
-│   │   └── theme.tsx               # Light/dark theme provider
-│   ├── middleware.ts                # Supabase session refresh + route guards
-│   └── utils/supabase/             # Supabase client/server/middleware helpers
+│   │   ├── events.ts                   # CalendarEvent type + utility functions
+│   │   ├── chat.ts                     # Chat types + offline parse helpers
+│   │   ├── gcalSync.ts                 # Google Calendar fetch, parse, color mapping, conflicts
+│   │   └── theme.tsx                   # Light/dark theme provider
+│   ├── middleware.ts                   # Supabase session refresh + route guards
+│   └── utils/supabase/                 # Supabase client/server/middleware helpers
+├── supabase/
+│   └── migrations/
+│       └── 001_create_events_table.sql # Database schema + RLS policies
 ├── public/
 ├── package.json
 ├── next.config.ts
@@ -142,10 +169,10 @@ Kronos/
 
 | Area | Status |
 |---|---|
-| Event persistence | In-memory + sessionStorage only. No database storage for events yet. |
-| Google Calendar sync | Import flow is built; requires OAuth token from Supabase Google provider. |
+| Google Calendar sync | Import-only (read-only scope); does not push events back to Google. |
 | Recurring events | Supported via AI chat (expanded to individual events), no native recurrence rules. |
 | Mobile optimization | Not yet optimized for mobile viewports. |
+| Mapbox | Requires access token; shows placeholder when not configured. |
 
 ---
 
@@ -153,7 +180,8 @@ Kronos/
 
 - Do not commit `.env` — it is included in `.gitignore`.
 - Keep API keys private.
-- Supabase handles auth; the app falls back to localStorage for guest sessions.
+- Supabase handles auth with Row-Level Security; each user can only access their own events.
+- The app falls back to localStorage for guest sessions.
 
 ---
 

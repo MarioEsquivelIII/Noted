@@ -65,14 +65,14 @@ const followUpActions = [
   "What's next?",
   "Find free time",
   "Show my week",
-  "Reschedule something",
+  "Draft availability email",
 ];
 
 const recipes = [
   { label: "Summarize my day", color: "bg-[#5a8a4a]" },
   { label: "Find free time", color: "bg-[#5a4167]" },
-  { label: "Weekly recap", color: "bg-[#6b5a3e]" },
-  { label: "Sync calendar", color: "bg-[#415a67]" },
+  { label: "Draft availability", color: "bg-[#6b5a3e]" },
+  { label: "Weekly recap", color: "bg-[#415a67]" },
 ];
 
 export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleExpand, isLoading, onModeChange }: ChatBarProps) {
@@ -80,7 +80,7 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
   const [mode, setMode] = useState<ChatMode>("collapsed");
   const [showChips, setShowChips] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -196,14 +196,14 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!input.trim() && !imagePreview) || isLoading) return;
+    if ((!input.trim() && imagePreviews.length === 0) || isLoading) return;
     if (mode === "collapsed") {
       updateMode("floating");
       if (!isExpanded) onToggleExpand();
     }
-    onSendMessage(input.trim(), imagePreview || undefined);
+    onSendMessage(input.trim(), imagePreviews.length > 0 ? imagePreviews[0] : undefined);
     setInput("");
-    setImagePreview(null);
+    setImagePreviews([]);
   };
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -216,7 +216,7 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
         if (!file) return;
         const reader = new FileReader();
         reader.onloadend = () => {
-          setImagePreview(reader.result as string);
+          setImagePreviews((prev) => [...prev, reader.result as string]);
           if (mode === "collapsed") {
             updateMode("floating");
             if (!isExpanded) onToggleExpand();
@@ -229,17 +229,19 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
   }, [mode, isExpanded, onToggleExpand, updateMode]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setImagePreview(reader.result as string);
-      if (mode === "collapsed") {
-        updateMode("floating");
-        onToggleExpand();
-      }
-    };
-    reader.readAsDataURL(file);
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreviews((prev) => [...prev, reader.result as string]);
+        if (mode === "collapsed") {
+          updateMode("floating");
+          if (!isExpanded) onToggleExpand();
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const openMode = (newMode: ChatMode) => {
@@ -264,6 +266,7 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
   // Shared input box
   const renderInputBox = () => (
     <div className="glass-card rounded-xl overflow-hidden">
+      {/* Context row */}
       <div className="flex items-center gap-2 px-3 pt-2">
         <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>My calendar</span>
         <span className="text-xs" style={{ color: "var(--text-muted)" }}>All events</span>
@@ -283,8 +286,8 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
       </form>
       <div className="flex items-center justify-between px-3 pb-2">
         <div className="flex items-center gap-1">
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 rounded-lg transition-colors" title="Upload image" onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+          <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 rounded-lg transition-colors" title="Upload image (schedule, screenshot)" onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
           </button>
           <button type="button" className="p-1.5 rounded-lg transition-colors" title="Settings" onClick={() => openMode(mode === "sidebar" ? "floating" : "sidebar")} onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
@@ -295,8 +298,8 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
           <button type="button" onClick={toggleVoice} className={`p-2 rounded-full transition-all ${isListening ? "animate-pulse" : ""}`} style={{ background: isListening ? "var(--accent)" : "var(--bg-hover)" }} title={isListening ? "Stop recording (sends message)" : "Voice input"}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isListening ? "white" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
           </button>
-          <button onClick={handleSubmit} disabled={(!input.trim() && !imagePreview) || isLoading} className="p-2 rounded-full transition-colors disabled:opacity-30" style={{ background: "var(--bg-hover)" }} title="Send">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={input.trim() || imagePreview ? "var(--accent)" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16V8M8 12l4-4 4 4" /></svg>
+          <button onClick={handleSubmit} disabled={(!input.trim() && imagePreviews.length === 0) || isLoading} className="p-2 rounded-full transition-colors disabled:opacity-30" style={{ background: "var(--bg-hover)" }} title="Send">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={input.trim() || imagePreviews.length > 0 ? "var(--accent)" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16V8M8 12l4-4 4 4" /></svg>
           </button>
         </div>
       </div>
@@ -329,15 +332,21 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
   );
 
   const renderImagePreview = () => {
-    if (!imagePreview) return null;
+    if (imagePreviews.length === 0) return null;
     return (
-      <div className="px-4 pt-3">
-        <div className="relative inline-block">
-          <img src={imagePreview} alt="Upload preview" className="h-20 rounded-xl" style={{ border: "1px solid var(--glass-border)" }} />
-          <button onClick={() => setImagePreview(null)} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-colors" style={{ background: "var(--bg-hover)" }}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
+      <div className="px-4 pt-3 flex gap-2 flex-wrap">
+        {imagePreviews.map((img, i) => (
+          <div key={i} className="relative inline-block">
+            <img src={img} alt={`Upload ${i + 1}`} className="h-20 rounded-xl" style={{ border: "1px solid var(--glass-border)" }} />
+            <button
+              onClick={() => setImagePreviews((prev) => prev.filter((_, j) => j !== i))}
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-colors"
+              style={{ background: "var(--bg-hover)" }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        ))}
       </div>
     );
   };
@@ -358,6 +367,21 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
             }
           >
             {msg.content}
+            {/* Copy button for assistant messages that look like emails */}
+            {msg.role === "assistant" && (msg.content.includes("Hi ") || msg.content.includes("Thank you for") || msg.content.includes("Best,") || msg.content.includes("availability")) && (
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(msg.content);
+                  const btn = document.getElementById(`copy-${msg.id}`);
+                  if (btn) { btn.textContent = "Copied!"; setTimeout(() => { btn.textContent = "Copy to clipboard"; }, 2000); }
+                }}
+                id={`copy-${msg.id}`}
+                className="mt-2 block px-3 py-1 rounded-lg text-[11px] transition-colors"
+                style={{ background: "var(--bg-hover)", color: "var(--text-secondary)", border: "1px solid var(--border-color)" }}
+              >
+                Copy to clipboard
+              </button>
+            )}
           </div>
         </div>
       ))}
@@ -405,7 +429,14 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
       onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
       onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
     >
-      <span className="font-logo text-lg" style={{ color: "var(--text-primary)" }}>Noted</span>
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "var(--accent)" }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+      </div>
     </button>
   );
 
@@ -445,7 +476,7 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
 
   const containerClass = (() => {
     switch (mode) {
-      case "sidebar": return "fixed top-14 right-0 bottom-0 w-[400px] z-50 flex flex-col border-l";
+      case "sidebar": return "fixed top-[68px] right-3 bottom-3 w-[400px] z-50 flex flex-col rounded-2xl shadow-2xl overflow-hidden border";
       case "floating": return "fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[600px] max-w-[90vw] h-[50vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden border";
       default: return "";
     }
@@ -516,10 +547,28 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
   // ========== COLLAPSED MODE — compact floating pill ==========
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50" onMouseEnter={handleBarMouseEnter} onMouseLeave={handleBarMouseLeave}>
+      {/* Image previews above collapsed pill */}
+      {imagePreviews.length > 0 && (
+        <div className="flex gap-2 justify-center mb-2">
+          {imagePreviews.map((img, i) => (
+            <div key={i} className="relative">
+              <img src={img} alt={`Preview ${i + 1}`} className="h-12 rounded-lg shadow-lg" style={{ border: "1px solid var(--glass-border)" }} />
+              <button
+                onClick={() => setImagePreviews((prev) => prev.filter((_, j) => j !== i))}
+                className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-white"
+                style={{ background: "#e87171", fontSize: "8px" }}
+              >
+                x
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className={`flex items-center justify-center gap-2 mb-2 transition-all duration-200 ${showChips ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2 pointer-events-none"}`}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
         {activeActions.map((action) => (
-          <button key={action} onClick={() => onSendMessage(action)} className="px-2.5 py-1 rounded-full text-[11px] transition-all whitespace-nowrap glass-card" style={{ color: "var(--text-secondary)" }}>
+          <button key={action} onClick={() => { updateMode("floating"); if (!isExpanded) onToggleExpand(); onSendMessage(action); }} className="px-2.5 py-1 rounded-full text-[11px] transition-all whitespace-nowrap glass-card" style={{ color: "var(--text-secondary)" }}>
             {action}
           </button>
         ))}
@@ -527,8 +576,8 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
       <form onSubmit={handleSubmit} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 shadow-lg glass-card">
         <input ref={inputRef} type="text" value={input} onChange={(e) => setInput(e.target.value)} onPaste={handlePaste} placeholder="What do you have planned today?" className="bg-transparent text-sm outline-none w-64" style={{ color: "var(--text-primary)" }} />
         <div className="flex items-center gap-0.5">
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1 rounded-full transition-colors" title="Upload image">
+          <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1 rounded-full transition-colors" title="Upload image (schedule, screenshot)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
           </button>
           <button type="button" onClick={() => { updateMode("floating"); if (!isExpanded) onToggleExpand(); }} className="p-1 rounded-full transition-colors" title="Open chat settings">
@@ -537,8 +586,8 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
           <button type="button" onClick={toggleVoice} className={`p-1 rounded-full transition-all ${isListening ? "animate-pulse" : ""}`} style={{ background: isListening ? "var(--accent)" : "transparent" }} title={isListening ? "Stop recording" : "Voice input"}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={isListening ? "white" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
           </button>
-          <button type="submit" disabled={!input.trim() || isLoading} className="p-1 rounded-full transition-colors disabled:opacity-30">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={input.trim() ? "var(--accent)" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16V8M8 12l4-4 4 4" /></svg>
+          <button type="submit" disabled={(!input.trim() && imagePreviews.length === 0) || isLoading} className="p-1 rounded-full transition-colors disabled:opacity-30">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={input.trim() || imagePreviews.length > 0 ? "var(--accent)" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16V8M8 12l4-4 4 4" /></svg>
           </button>
         </div>
       </form>

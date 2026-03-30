@@ -14,6 +14,29 @@ export interface GcalApiEvent {
   summary?: string;
   start?: { dateTime?: string; date?: string; timeZone?: string };
   end?: { dateTime?: string; date?: string; timeZone?: string };
+  colorId?: string;
+}
+
+// Google Calendar colorId → Noted color mapping
+// See: https://developers.google.com/calendar/api/v3/reference/colors
+type EventColor = "green" | "blue" | "orange" | "red" | "purple" | "gray" | "teal" | "yellow" | "pink";
+const GCAL_COLOR_MAP: Record<string, EventColor> = {
+  "1":  "purple",   // Lavender
+  "2":  "green",    // Sage
+  "3":  "purple",   // Grape
+  "4":  "pink",     // Flamingo
+  "5":  "yellow",   // Banana
+  "6":  "orange",   // Tangerine
+  "7":  "teal",     // Peacock
+  "8":  "gray",     // Graphite
+  "9":  "blue",     // Blueberry
+  "10": "green",    // Basil
+  "11": "red",      // Tomato
+};
+
+function gcalColorToNoted(colorId?: string): EventColor {
+  if (!colorId) return "blue"; // Default Google Calendar blue
+  return GCAL_COLOR_MAP[colorId] || "blue";
 }
 
 export interface GcalListResponse {
@@ -50,6 +73,8 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
   const end = raw.end;
   if (!start) return [];
 
+  const eventColor = gcalColorToNoted(raw.colorId);
+
   // All-day events: Google uses date (not dateTime) and end date is exclusive
   if (start.date && !start.dateTime) {
     const startDate = new Date(start.date + "T00:00:00");
@@ -66,7 +91,7 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
         date: dayStr,
         startTime: "00:00",
         endTime: "23:59",
-        color: "blue",
+        color: eventColor,
         allDay: true,
       });
       cursor.setDate(cursor.getDate() + 1);
@@ -91,7 +116,7 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
         date: startDate,
         startTime: toHHMM(s),
         endTime: toHHMM(e),
-        color: "blue",
+        color: eventColor,
       }];
     }
 
@@ -112,7 +137,7 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
         date: dayStr,
         startTime: isFirst ? toHHMM(s) : "00:00",
         endTime: isLast ? toHHMM(e) : "23:59",
-        color: "blue",
+        color: eventColor,
       });
       cursor.setDate(cursor.getDate() + 1);
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import ComingUp from "@/components/ComingUp";
@@ -9,7 +9,8 @@ import ChatBar from "@/components/ChatBar";
 import EventContextMenu from "@/components/EventContextMenu";
 import EditEventModal from "@/components/EditEventModal";
 import EventDetailPanel from "@/components/EventDetailPanel";
-import { CalendarEvent, sampleEvents, generateId } from "@/lib/events";
+import MapView from "@/components/MapView";
+import { CalendarEvent, generateId } from "@/lib/events";
 import { EVENTS_SNAPSHOT_KEY, GCAL_IMPORT_KEY } from "@/lib/gcalSync";
 import { ChatMessage } from "@/lib/chat";
 import { useTheme } from "@/lib/theme";
@@ -17,61 +18,152 @@ import { User } from "@supabase/supabase-js";
 
 const NOTED_FEEDBACK_FORM_URL = "https://forms.gle/SsLmAmPGHRCwnewL7";
 
+// GT campus location lookup for resolving AI-provided location names to coordinates
+const GT_LOCATIONS: Record<string, { name: string; lat: number; lng: number }> = {
+  ccb: { name: "CCB", lat: 33.7773, lng: -84.3963 },
+  clough: { name: "Clough Commons", lat: 33.7773, lng: -84.3963 },
+  kendeda: { name: "Kendeda", lat: 33.7783, lng: -84.3978 },
+  scheller: { name: "Scheller", lat: 33.7766, lng: -84.3876 },
+  coda: { name: "CODA", lat: 33.7748, lng: -84.3874 },
+  klaus: { name: "Klaus", lat: 33.7772, lng: -84.3928 },
+  coc: { name: "College of Computing", lat: 33.7774, lng: -84.3975 },
+  "college of computing": { name: "College of Computing", lat: 33.7774, lng: -84.3975 },
+  "student center": { name: "Student Center", lat: 33.7739, lng: -84.3986 },
+  crc: { name: "CRC", lat: 33.7755, lng: -84.4035 },
+  "campus recreation": { name: "CRC", lat: 33.7755, lng: -84.4035 },
+  library: { name: "Price Gilbert Library", lat: 33.7741, lng: -84.3958 },
+  "price gilbert": { name: "Price Gilbert Library", lat: 33.7741, lng: -84.3958 },
+  "tech square": { name: "Tech Square", lat: 33.7766, lng: -84.3890 },
+  "north ave": { name: "North Ave", lat: 33.7697, lng: -84.3906 },
+  howey: { name: "Howey Physics", lat: 33.7775, lng: -84.3988 },
+  "van leer": { name: "Van Leer", lat: 33.7760, lng: -84.3984 },
+};
+
+function resolveLocation(locationStr: string): { name: string; lat: number; lng: number } | undefined {
+  if (!locationStr) return undefined;
+  const lower = locationStr.toLowerCase();
+  // Try exact match first
+  if (GT_LOCATIONS[lower]) return { ...GT_LOCATIONS[lower], name: locationStr };
+  // Try partial match
+  for (const [key, loc] of Object.entries(GT_LOCATIONS)) {
+    if (lower.includes(key) || key.includes(lower)) {
+      return { ...loc, name: locationStr };
+    }
+  }
+  // No coordinates found — return name only (won't appear on map but shows in detail panel)
+  return undefined;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const supabase = createClient();
   const [user, setUser] = useState<User | null>(null);
   const [displayName, setDisplayName] = useState("");
-  const [events, setEvents] = useState<CalendarEvent[]>(sampleEvents);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatExpanded, setChatExpanded] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
-  const [view, setView] = useState<"home" | "overview" | "calendar">("overview");
+  const [view, setView] = useState<"home" | "overview" | "calendar" | "map">("overview");
   const [contextMenu, setContextMenu] = useState<{ event: CalendarEvent; x: number; y: number } | null>(null);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
   const [detailPanel, setDetailPanel] = useState<{ event: CalendarEvent; x: number; y: number } | null>(null);
   const [chatMode, setChatMode] = useState<"collapsed" | "floating" | "sidebar" | "fullscreen">("collapsed");
   const { theme, toggleTheme } = useTheme();
+  const isAuthenticatedRef = useRef(false);
+  const eventsLoadedRef = useRef(false);
 
+
+  // --- Auth + event loading ---
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
+    supabase.auth.getUser().then(async ({ data: { user: authUser } }) => {
+      if (!authUser) {
+        // Guest fallback
         const stored = localStorage.getItem("noted_user");
         if (stored) {
           const parsed = JSON.parse(stored);
           setDisplayName(parsed.name || parsed.email?.split("@")[0] || "User");
+        } else {
+          router.push("/login");
           return;
         }
-        router.push("/login");
+        // Load events from localStorage for guests
+        isAuthenticatedRef.current = false;
+        const savedEvents = localStorage.getItem("noted_events");
+        if (savedEvents) {
+          try {
+            setEvents(JSON.parse(savedEvents));
+          } catch {
+            setEvents([]);
+          }
+        }
+        eventsLoadedRef.current = true;
         return;
       }
-      setUser(user);
+      setUser(authUser);
       setDisplayName(
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        user.email?.split("@")[0] ||
+        authUser.user_metadata?.full_name ||
+        authUser.user_metadata?.name ||
+        authUser.email?.split("@")[0] ||
         "User"
       );
+      isAuthenticatedRef.current = true;
+
+      // Check if there's a pending Google Calendar import — if so, use those events
+      // instead of loading from Supabase (the import handler will persist them)
+      const pendingImport = sessionStorage.getItem(GCAL_IMPORT_KEY);
+      if (pendingImport) {
+        // Remove immediately so a second effect run doesn't re-process
+        sessionStorage.removeItem(GCAL_IMPORT_KEY);
+        try {
+          const parsed = JSON.parse(pendingImport);
+          const imported: CalendarEvent[] = Array.isArray(parsed) ? parsed : parsed?.events;
+          const replaceAll: boolean = !Array.isArray(parsed) && parsed?.replaceAll === true;
+          if (Array.isArray(imported) && imported.length > 0) {
+            setEvents(imported);
+            eventsLoadedRef.current = true;
+            // Persist to Supabase and wait for it to complete
+            const url = replaceAll ? "/api/events?replaceAll=1" : "/api/events";
+            try {
+              await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(imported),
+              });
+            } catch { /* persist failed, events still in local state */ }
+            return;
+          }
+        } catch { /* parse failed, fall through to normal load */ }
+      }
+
+      // If events were already loaded by an import (React strict mode double-run),
+      // don't overwrite them
+      if (eventsLoadedRef.current) return;
+
+      // Load events from Supabase for authenticated users
+      try {
+        const res = await fetch("/api/events");
+        if (res.ok) {
+          const data = await res.json();
+          setEvents(data.events || []);
+        }
+      } catch {
+        // API unreachable — start empty
+      }
+      eventsLoadedRef.current = true;
     });
   }, [router, supabase.auth]);
 
-  useLayoutEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(GCAL_IMPORT_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        setEvents(parsed as CalendarEvent[]);
-      }
-      sessionStorage.removeItem(GCAL_IMPORT_KEY);
-    } catch {
-      sessionStorage.removeItem(GCAL_IMPORT_KEY);
-    }
-  }, []);
+  // Google Calendar imports are now handled inside the auth effect above
+  // to avoid race conditions where Supabase loading overwrites imported events.
 
+  // Keep sessionStorage snapshot + localStorage fallback in sync
   useEffect(() => {
+    if (!eventsLoadedRef.current) return;
     try {
       sessionStorage.setItem(EVENTS_SNAPSHOT_KEY, JSON.stringify(events));
+      if (!isAuthenticatedRef.current) {
+        localStorage.setItem("noted_events", JSON.stringify(events));
+      }
     } catch {
       /* quota */
     }
@@ -86,6 +178,9 @@ export default function HomePage() {
     setEvents((prev) => prev.filter((e) => e.id !== id));
     setDetailPanel(null);
     setContextMenu(null);
+    if (isAuthenticatedRef.current) {
+      fetch(`/api/events?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+    }
   }, []);
 
   const handleEditEvent = useCallback((event: CalendarEvent) => {
@@ -99,10 +194,24 @@ export default function HomePage() {
       return [...prev, updated];
     });
     setEditingEvent(null);
+    if (isAuthenticatedRef.current) {
+      fetch("/api/events", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      }).catch(() => {});
+    }
   }, []);
 
   const handleAddEvent = useCallback((event: CalendarEvent) => {
     setEvents((prev) => [...prev, event]);
+    if (isAuthenticatedRef.current) {
+      fetch("/api/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+      }).catch(() => {});
+    }
   }, []);
 
   const handleClickEvent = useCallback((event: CalendarEvent, x: number, y: number) => {
@@ -151,37 +260,68 @@ export default function HomePage() {
       }
 
       if (parsed?.actions) {
+        const toAdd: CalendarEvent[] = [];
+        const toDeleteIds: string[] = [];
+
         setEvents((prev) => {
           let updated = [...prev];
-          const toAdd: CalendarEvent[] = [];
 
           for (const action of parsed.actions) {
             if (action.type === "delete") {
               if (action.id) {
+                toDeleteIds.push(action.id);
                 updated = updated.filter((e) => e.id !== action.id);
               } else if (action.title) {
                 const titleLower = action.title.toLowerCase();
                 const dateFilter = action.date;
                 updated = updated.filter((e) => {
                   const match = e.title.toLowerCase().includes(titleLower) || titleLower.includes(e.title.toLowerCase());
-                  if (dateFilter) return !(match && e.date === dateFilter);
-                  return !match;
+                  if (dateFilter && match && e.date === dateFilter) {
+                    toDeleteIds.push(e.id);
+                    return false;
+                  }
+                  if (!dateFilter && match) {
+                    toDeleteIds.push(e.id);
+                    return false;
+                  }
+                  return true;
                 });
               }
             } else if (action.type === "add") {
-              toAdd.push({
+              const newEvent: CalendarEvent = {
                 id: generateId(),
                 title: action.title,
                 date: action.date,
                 startTime: action.startTime,
                 endTime: action.endTime,
                 color: action.color || "green",
-              });
+              };
+              if (action.location) {
+                const resolved = resolveLocation(action.location);
+                if (resolved) {
+                  newEvent.location = resolved;
+                }
+              }
+              toAdd.push(newEvent);
             }
           }
 
           return [...updated, ...toAdd];
         });
+
+        // Persist to Supabase
+        if (isAuthenticatedRef.current) {
+          for (const id of toDeleteIds) {
+            fetch(`/api/events?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+          }
+          if (toAdd.length > 0) {
+            fetch("/api/events", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(toAdd),
+            }).catch(() => {});
+          }
+        }
       }
 
       const assistantMsg: ChatMessage = {
@@ -213,6 +353,7 @@ export default function HomePage() {
     { key: "home", label: "Home" },
     { key: "overview", label: "Overview" },
     { key: "calendar", label: "Calendar" },
+    { key: "map", label: "Map" },
   ];
 
   return (
@@ -456,8 +597,16 @@ export default function HomePage() {
               onAddEvent={handleAddEvent}
               onClickEvent={handleClickEvent}
               onUpdateEvent={handleSaveEvent}
+              onGoogleSync={async () => { router.push("/account"); }}
             />
           </div>
+        </div>
+      )}
+
+      {/* ========== MAP TAB ========== */}
+      {view === "map" && (
+        <div className={`flex flex-col pt-20 relative z-10 transition-all ${chatMode === "sidebar" ? "mr-100" : ""}`} style={{ height: "100vh" }}>
+          <MapView events={events} theme={theme} />
         </div>
       )}
 

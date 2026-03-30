@@ -108,12 +108,15 @@ export default function AccountPage() {
       return;
     }
     const origin = typeof window !== "undefined" ? window.location.origin : "";
+    // Store redirect target in cookie so the auth callback can find it
+    // even if Supabase's OAuth flow drops the query param
+    document.cookie = `noted_oauth_next=${encodeURIComponent("/account?gcal_pending=1")}; path=/; max-age=300; SameSite=Lax`;
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           scopes: "https://www.googleapis.com/auth/calendar.readonly",
-          redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/account?gcal_pending=1")}`,
+          redirectTo: `${origin}/auth/callback`,
           queryParams: {
             access_type: "offline",
             prompt: "consent",
@@ -141,9 +144,9 @@ export default function AccountPage() {
     setGcalSyncOpen(true);
   };
 
-  const onGcalImportComplete = (events: CalendarEvent[]) => {
+  const onGcalImportComplete = (events: CalendarEvent[], strategy?: "overwrite" | "merge") => {
     try {
-      sessionStorage.setItem(GCAL_IMPORT_KEY, JSON.stringify(events));
+      sessionStorage.setItem(GCAL_IMPORT_KEY, JSON.stringify({ events, replaceAll: strategy === "overwrite" }));
     } catch {
       setGcalOAuthError("Couldn't save imported events. Try again with fewer events.");
       return;

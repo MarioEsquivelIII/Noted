@@ -22,7 +22,7 @@ interface GoogleCalendarSyncFlowProps {
   open: boolean;
   accessToken: string;
   onClose: () => void;
-  onImportComplete: (events: CalendarEvent[]) => void;
+  onImportComplete: (events: CalendarEvent[], strategy?: "overwrite" | "merge") => void;
 }
 
 export default function GoogleCalendarSyncFlow({
@@ -129,7 +129,7 @@ export default function GoogleCalendarSyncFlow({
   };
 
   const handleOverwrite = () => {
-    onImportComplete(fetched);
+    onImportComplete(fetched, "overwrite");
     onClose();
   };
 
@@ -137,7 +137,7 @@ export default function GoogleCalendarSyncFlow({
     const existing = readEventsSnapshot();
     const rows = findConflictRows(existing, fetched);
     if (rows.length === 0) {
-      onImportComplete([...existing, ...fetched]);
+      onImportComplete([...existing, ...fetched], "merge");
       onClose();
       return;
     }
@@ -161,7 +161,7 @@ export default function GoogleCalendarSyncFlow({
       map.set(k, v);
     }
     const merged = applyMergeWithResolutions(existing, fetched, conflictRows, map);
-    onImportComplete(merged);
+    onImportComplete(merged, "merge");
     onClose();
   };
 

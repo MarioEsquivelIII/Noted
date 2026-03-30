@@ -11,8 +11,8 @@ export async function POST(req: NextRequest) {
 
     const eventsContext = events
       .map(
-        (e: { id: string; title: string; date: string; startTime: string; endTime: string; color: string }) =>
-          `- [id:${e.id}] "${e.title}" on ${e.date} from ${e.startTime} to ${e.endTime} (${e.color})`
+        (e: { id: string; title: string; date: string; startTime: string; endTime: string; color: string; location?: { name: string; lat: number; lng: number } }) =>
+          `- [id:${e.id}] "${e.title}" on ${e.date} from ${e.startTime} to ${e.endTime} (${e.color})${e.location ? ` @ ${e.location.name}` : ""}`
       )
       .join("\n");
 
@@ -44,10 +44,28 @@ ${eventsContext || "No events scheduled yet."}
 
 When the user wants to add, modify, or delete events, respond with a JSON block in your message using this format:
 \`\`\`json
-{"actions": [{"type": "add", "title": "Event Name", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "color": "green"}]}
+{"actions": [{"type": "add", "title": "Event Name", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "color": "green", "location": "Building Name"}]}
 \`\`\`
 
 Available colors: green, blue, orange, red, purple, gray.
+
+LOCATION HANDLING:
+When a location/building is mentioned, include the "location" field with the building/room name (e.g., "CCB 101", "Kendeda 152").
+Known GT campus locations (use these coordinates when matching):
+- CCB/Clough Commons: lat 33.7773, lng -84.3963
+- Kendeda: lat 33.7783, lng -84.3978
+- Scheller: lat 33.7766, lng -84.3876
+- CODA: lat 33.7748, lng -84.3874
+- Klaus: lat 33.7772, lng -84.3928
+- College of Computing (CoC): lat 33.7774, lng -84.3975
+- Student Center: lat 33.7739, lng -84.3986
+- CRC (Campus Recreation Center): lat 33.7755, lng -84.4035
+- Library (Price Gilbert): lat 33.7741, lng -84.3958
+- Tech Square: lat 33.7766, lng -84.3890
+- North Ave: lat 33.7697, lng -84.3906
+- Howey Physics: lat 33.7775, lng -84.3988
+- Van Leer: lat 33.7760, lng -84.3984
+If the location doesn't match a known building, still include the location name without coordinates.
 For delete actions: {"type": "delete", "id": "event_id"}
 For MOVE/RESCHEDULE actions (e.g. "move dinner to 8 PM", "switch gym to morning", "move workout to 6 AM"):
   1. First DELETE the old event using its id
