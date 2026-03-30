@@ -19,7 +19,7 @@ It turns natural-language descriptions into structured, editable weekly calendar
 - Inline event editing with a Notion-style detail panel and edit modal
 - Right-click context menu for quick event actions
 - Follow-up chat prompts to add, move, or remove events without starting over
-- Recurring event support (e.g. "gym every weekday for 4 weeks")
+- Recurring event support
 - Google Calendar import with calendar selection, conflict resolution (merge or overwrite), and color preservation
 - Interactive Mapbox map view showing event locations with walking routes
 - Copy-to-clipboard for AI-drafted availability emails
