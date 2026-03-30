@@ -329,10 +329,17 @@ export async function fetchCalendarList(accessToken: string): Promise<GcalCalend
     try {
       body = (await res.json()) as GcalCalendarListResponse;
     } catch {
-      break;
+      throw new Error("Failed to parse Google Calendar response. Please try again.");
     }
 
-    if (!res.ok) break;
+    if (!res.ok) {
+      const msg = body?.error?.message || `HTTP ${res.status}`;
+      console.error("[gcalSync] Calendar list API error:", res.status, msg);
+      if (res.status === 401) {
+        throw new Error("Google Calendar access token expired or invalid. Please reconnect your Google account.");
+      }
+      throw new Error(`Failed to load calendars: ${msg}`);
+    }
 
     for (const cal of body.items || []) {
       if (cal.id) {
