@@ -19,9 +19,11 @@ export default function AccountPage() {
   const [gcalOAuthError, setGcalOAuthError] = useState<string | null>(null);
 
   const refreshSessionTokens = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    setGoogleProviderToken(session?.provider_token ?? null);
-  }, [supabase.auth]);
+    // Only use the cookie token (set after OAuth with calendar scope).
+    // session.provider_token from Supabase login may lack calendar.readonly scope.
+    const match = typeof document !== "undefined" ? document.cookie.match(/noted_google_token=([^;]+)/) : null;
+    setGoogleProviderToken(match ? decodeURIComponent(match[1]) : null);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user: supaUser } }) => {
@@ -47,8 +49,11 @@ export default function AccountPage() {
   }, [router, supabase.auth, refreshSessionTokens]);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setGoogleProviderToken(session?.provider_token ?? null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      // Re-check the cookie on auth state changes (e.g. after OAuth redirect).
+      // Don't use session.provider_token — it may lack calendar scope.
+      const match = document.cookie.match(/noted_google_token=([^;]+)/);
+      setGoogleProviderToken(match ? decodeURIComponent(match[1]) : null);
     });
     return () => subscription.unsubscribe();
   }, [supabase.auth]);
@@ -62,15 +67,18 @@ export default function AccountPage() {
     window.history.replaceState({}, "", `${url.pathname}${search ? `?${search}` : ""}`);
 
     void (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.provider_token ?? null;
+      // Use the cookie token (set after OAuth with calendar scope).
+      // session.provider_token from Supabase login may lack calendar.readonly scope.
+      const match = document.cookie.match(/noted_google_token=([^;]+)/);
+      const token = match ? decodeURIComponent(match[1]) : null;
+
       if (token) {
         setGoogleProviderToken(token);
         setGcalSyncOpen(true);
         setGcalOAuthError(null);
       } else {
         setGcalOAuthError(
-          "Google Calendar access wasn't granted or isn't available on this session. In Supabase, ensure the Google provider allows extra scopes, then try Connect again."
+          "Google Calendar access token expired. Click 'Connect Google Calendar' to re-authorize."
         );
       }
     })();
@@ -137,7 +145,15 @@ export default function AccountPage() {
       setGcalOAuthError("Sign in with your account (not guest mode) to sync Google Calendar.");
       return;
     }
+    // Check cookie for token if state is empty
     if (!googleProviderToken) {
+      const match = document.cookie.match(/noted_google_token=([^;]+)/);
+      if (match) {
+        const token = decodeURIComponent(match[1]);
+        setGoogleProviderToken(token);
+        setGcalSyncOpen(true);
+        return;
+      }
       void handleGoogleCalConnect();
       return;
     }
