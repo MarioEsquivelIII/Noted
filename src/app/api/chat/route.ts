@@ -7,7 +7,7 @@ const openai = new OpenAI({
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, events, imageBase64, today: clientToday } = await req.json();
+    const { message, events, imageBase64, today: clientToday, academicContext } = await req.json();
 
     const eventsContext = events
       .map(
@@ -93,7 +93,11 @@ For image uploads (schedule, class timetable, calendar screenshot):
 
 Match events by title when the user refers to them casually (e.g. "gym" matches "Morning Gym", "dinner" matches "Dinner").
 
-Keep responses concise and friendly. Use bullet points for listing events. Always include the JSON action block when creating/modifying events — the app parses it automatically. If no action is needed, just respond conversationally without a JSON block.`;
+Keep responses concise and friendly. Use bullet points for listing events. Always include the JSON action block when creating/modifying events — the app parses it automatically. If no action is needed, just respond conversationally without a JSON block.${
+  academicContext
+    ? `\n\n${academicContext}`
+    : ""
+}`;
 
     // Build message content — text only or text + image
     const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];

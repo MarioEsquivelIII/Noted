@@ -4,8 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import GoogleCalendarSyncFlow from "@/components/GoogleCalendarSyncFlow";
+import CanvasSyncFlow from "@/components/CanvasSyncFlow";
 import type { CalendarEvent } from "@/lib/events";
 import { GCAL_IMPORT_KEY } from "@/lib/gcalSync";
+import { CANVAS_IMPORT_KEY } from "@/lib/canvas/constants";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -17,6 +19,13 @@ export default function AccountPage() {
   const [googleProviderToken, setGoogleProviderToken] = useState<string | null>(null);
   const [gcalSyncOpen, setGcalSyncOpen] = useState(false);
   const [gcalOAuthError, setGcalOAuthError] = useState<string | null>(null);
+
+  // Canvas LMS state
+  const [canvasConnected, setCanvasConnected] = useState(false);
+  const [canvasDomain, setCanvasDomain] = useState<string | null>(null);
+  const [canvasLastSync, setCanvasLastSync] = useState<string | null>(null);
+  const [canvasSyncOpen, setCanvasSyncOpen] = useState(false);
+  const [canvasError, setCanvasError] = useState<string | null>(null);
 
   const refreshSessionTokens = useCallback(async () => {
     // Only use the cookie token (set after OAuth with calendar scope).
@@ -46,6 +55,16 @@ export default function AccountPage() {
       }
     });
     refreshSessionTokens();
+
+    // Check Canvas connection status
+    fetch("/api/canvas/status")
+      .then((r) => r.json())
+      .then((data) => {
+        setCanvasConnected(!!data.connected);
+        setCanvasDomain(data.domain || null);
+        setCanvasLastSync(data.lastSyncedAt || null);
+      })
+      .catch(() => {});
   }, [router, supabase.auth, refreshSessionTokens]);
 
   useEffect(() => {
@@ -160,6 +179,59 @@ export default function AccountPage() {
     setGcalSyncOpen(true);
   };
 
+  // Handle Canvas OAuth redirect
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("canvas_connected") === "1") {
+      url.searchParams.delete("canvas_connected");
+      window.history.replaceState({}, "", `${url.pathname}${url.search || ""}`);
+      setCanvasConnected(true);
+      setCanvasSyncOpen(true);
+      // Refresh status
+      fetch("/api/canvas/status")
+        .then((r) => r.json())
+        .then((data) => {
+          setCanvasDomain(data.domain || null);
+          setCanvasLastSync(data.lastSyncedAt || null);
+        })
+        .catch(() => {});
+    }
+    const canvasErr = url.searchParams.get("canvas_error");
+    if (canvasErr) {
+      url.searchParams.delete("canvas_error");
+      window.history.replaceState({}, "", `${url.pathname}${url.search || ""}`);
+      setCanvasError(canvasErr.replace(/_/g, " "));
+    }
+  }, []);
+
+  const handleCanvasDisconnect = async () => {
+    if (!confirm("Disconnect Canvas LMS? Your synced academic data will be removed.")) return;
+    try {
+      await fetch("/api/canvas/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keepEvents: false }),
+      });
+      setCanvasConnected(false);
+      setCanvasDomain(null);
+      setCanvasLastSync(null);
+      setCanvasError(null);
+    } catch {
+      setCanvasError("Failed to disconnect Canvas");
+    }
+  };
+
+  const onCanvasImportComplete = (events: CalendarEvent[]) => {
+    try {
+      sessionStorage.setItem(CANVAS_IMPORT_KEY, JSON.stringify({ events, replaceAll: false }));
+    } catch {
+      setCanvasError("Couldn't save imported events. Try again.");
+      return;
+    }
+    router.push("/home");
+  };
+
   const onGcalImportComplete = (events: CalendarEvent[], strategy?: "overwrite" | "merge") => {
     try {
       sessionStorage.setItem(GCAL_IMPORT_KEY, JSON.stringify({ events, replaceAll: strategy === "overwrite" }));
@@ -180,6 +252,16 @@ export default function AccountPage() {
           accessToken={googleProviderToken}
           onClose={() => setGcalSyncOpen(false)}
           onImportComplete={onGcalImportComplete}
+        />
+      )}
+
+      {canvasSyncOpen && (
+        <CanvasSyncFlow
+          open={canvasSyncOpen}
+          onClose={() => setCanvasSyncOpen(false)}
+          onImportComplete={onCanvasImportComplete}
+          isConnected={canvasConnected}
+          connectionDomain={canvasDomain || undefined}
         />
       )}
 
@@ -282,6 +364,61 @@ export default function AccountPage() {
                 </button>
                 {gcalOAuthError && (
                   <p className="text-[10px] max-w-[200px] text-right leading-snug" style={{ color: "#e87171" }}>{gcalOAuthError}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Canvas LMS */}
+            <div className="flex items-center justify-between mt-4 pt-4" style={{ borderTop: "1px solid var(--glass-border)" }}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "var(--bg-hover)" }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#E24A3F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M2 17l10 5 10-5" stroke="#E24A3F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M2 12l10 5 10-5" stroke="#E24A3F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm" style={{ color: "var(--text-primary)" }}>Canvas LMS</p>
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                    {canvasConnected
+                      ? `Connected to ${canvasDomain}${canvasLastSync ? ` · Last synced ${new Date(canvasLastSync).toLocaleDateString()}` : ""}`
+                      : "Import courses, assignments, and class schedules"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                {canvasConnected ? (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCanvasSyncOpen(true)}
+                      className="px-3 py-1.5 rounded-xl text-xs transition-all hover:scale-[1.02]"
+                      style={{ background: "var(--bg-hover)", border: "1px solid var(--glass-border)", color: "var(--text-secondary)" }}
+                    >
+                      Sync now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCanvasDisconnect}
+                      className="px-3 py-1.5 rounded-xl text-xs transition-all hover:scale-[1.02]"
+                      style={{ background: "rgba(232,113,113,0.08)", border: "1px solid rgba(232,113,113,0.15)", color: "#e87171" }}
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setCanvasSyncOpen(true)}
+                    className="px-3 py-1.5 rounded-xl text-xs transition-all hover:scale-[1.02]"
+                    style={{ background: "var(--bg-hover)", border: "1px solid var(--glass-border)", color: "var(--text-secondary)" }}
+                  >
+                    Connect
+                  </button>
+                )}
+                {canvasError && (
+                  <p className="text-[10px] max-w-[200px] text-right leading-snug" style={{ color: "#e87171" }}>{canvasError}</p>
                 )}
               </div>
             </div>

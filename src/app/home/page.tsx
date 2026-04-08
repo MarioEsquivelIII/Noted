@@ -12,46 +12,18 @@ import EventDetailPanel from "@/components/EventDetailPanel";
 import MapView from "@/components/MapView";
 import { CalendarEvent, generateId } from "@/lib/events";
 import { EVENTS_SNAPSHOT_KEY, GCAL_IMPORT_KEY } from "@/lib/gcalSync";
+import { CANVAS_IMPORT_KEY } from "@/lib/canvas/constants";
+import { resolveKnownLocation } from "@/lib/canvas/geocode";
 import { ChatMessage } from "@/lib/chat";
 import { useTheme } from "@/lib/theme";
 import { User } from "@supabase/supabase-js";
 
 const NOTED_FEEDBACK_FORM_URL = "https://forms.gle/SsLmAmPGHRCwnewL7";
 
-// GT campus location lookup for resolving AI-provided location names to coordinates
-const GT_LOCATIONS: Record<string, { name: string; lat: number; lng: number }> = {
-  ccb: { name: "CCB", lat: 33.7773, lng: -84.3963 },
-  clough: { name: "Clough Commons", lat: 33.7773, lng: -84.3963 },
-  kendeda: { name: "Kendeda", lat: 33.7783, lng: -84.3978 },
-  scheller: { name: "Scheller", lat: 33.7766, lng: -84.3876 },
-  coda: { name: "CODA", lat: 33.7748, lng: -84.3874 },
-  klaus: { name: "Klaus", lat: 33.7772, lng: -84.3928 },
-  coc: { name: "College of Computing", lat: 33.7774, lng: -84.3975 },
-  "college of computing": { name: "College of Computing", lat: 33.7774, lng: -84.3975 },
-  "student center": { name: "Student Center", lat: 33.7739, lng: -84.3986 },
-  crc: { name: "CRC", lat: 33.7755, lng: -84.4035 },
-  "campus recreation": { name: "CRC", lat: 33.7755, lng: -84.4035 },
-  library: { name: "Price Gilbert Library", lat: 33.7741, lng: -84.3958 },
-  "price gilbert": { name: "Price Gilbert Library", lat: 33.7741, lng: -84.3958 },
-  "tech square": { name: "Tech Square", lat: 33.7766, lng: -84.3890 },
-  "north ave": { name: "North Ave", lat: 33.7697, lng: -84.3906 },
-  howey: { name: "Howey Physics", lat: 33.7775, lng: -84.3988 },
-  "van leer": { name: "Van Leer", lat: 33.7760, lng: -84.3984 },
-};
-
+// Location resolution now uses the shared module from src/lib/canvas/geocode.ts
+// which contains the GT_LOCATIONS lookup + Mapbox geocoding fallback
 function resolveLocation(locationStr: string): { name: string; lat: number; lng: number } | undefined {
-  if (!locationStr) return undefined;
-  const lower = locationStr.toLowerCase();
-  // Try exact match first
-  if (GT_LOCATIONS[lower]) return { ...GT_LOCATIONS[lower], name: locationStr };
-  // Try partial match
-  for (const [key, loc] of Object.entries(GT_LOCATIONS)) {
-    if (lower.includes(key) || key.includes(lower)) {
-      return { ...loc, name: locationStr };
-    }
-  }
-  // No coordinates found — return name only (won't appear on map but shows in detail panel)
-  return undefined;
+  return resolveKnownLocation(locationStr);
 }
 
 export default function HomePage() {
@@ -71,6 +43,7 @@ export default function HomePage() {
   const { theme, toggleTheme } = useTheme();
   const isAuthenticatedRef = useRef(false);
   const eventsLoadedRef = useRef(false);
+  const [academicContext, setAcademicContext] = useState<string | null>(null);
 
 
   // --- Auth + event loading ---
@@ -135,6 +108,33 @@ export default function HomePage() {
         } catch { /* parse failed, fall through to normal load */ }
       }
 
+      // Check for pending Canvas LMS import (same pattern as Google Calendar)
+      const pendingCanvasImport = sessionStorage.getItem(CANVAS_IMPORT_KEY);
+      if (pendingCanvasImport) {
+        sessionStorage.removeItem(CANVAS_IMPORT_KEY);
+        try {
+          const parsed = JSON.parse(pendingCanvasImport);
+          const imported: CalendarEvent[] = Array.isArray(parsed) ? parsed : parsed?.events;
+          if (Array.isArray(imported) && imported.length > 0) {
+            // Merge with existing events rather than replacing
+            setEvents((prev) => {
+              const existingIds = new Set(prev.map((e) => e.id));
+              const newEvents = imported.filter((e) => !existingIds.has(e.id));
+              return [...prev, ...newEvents];
+            });
+            eventsLoadedRef.current = true;
+            try {
+              await fetch("/api/events", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(imported),
+              });
+            } catch { /* persist failed, events still in local state */ }
+            return;
+          }
+        } catch { /* parse failed, fall through to normal load */ }
+      }
+
       // If events were already loaded by an import (React strict mode double-run),
       // don't overwrite them
       if (eventsLoadedRef.current) return;
@@ -155,6 +155,51 @@ export default function HomePage() {
 
   // Google Calendar imports are now handled inside the auth effect above
   // to avoid race conditions where Supabase loading overwrites imported events.
+
+  // Load Canvas academic context for AI planner
+  useEffect(() => {
+    if (!isAuthenticatedRef.current) return;
+    fetch("/api/canvas/status")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.connected) return;
+        // Build academic context from Canvas data via Supabase
+        const sb = createClient();
+        Promise.all([
+          sb.from("canvas_courses").select("course_code, name, color").eq("user_id", user?.id).eq("is_active", true),
+          sb.from("canvas_academic_items")
+            .select("title, item_type, due_at, canvas_courses(course_code)")
+            .eq("user_id", user?.id)
+            .eq("is_archived", false)
+            .not("due_at", "is", null)
+            .gte("due_at", new Date().toISOString())
+            .lte("due_at", new Date(Date.now() + 14 * 86400000).toISOString())
+            .order("due_at", { ascending: true })
+            .limit(20),
+        ]).then(([coursesRes, itemsRes]) => {
+          const courses = coursesRes.data || [];
+          const items = itemsRes.data || [];
+          if (courses.length === 0) return;
+
+          let ctx = `Academic context (from Canvas LMS — ${data.domain}):\n\nCurrent courses:\n`;
+          for (const c of courses) {
+            ctx += `  - ${c.course_code || c.name}\n`;
+          }
+          if (items.length > 0) {
+            ctx += `\nUpcoming deadlines (next 14 days):\n`;
+            for (const i of items) {
+              const cc = (i as Record<string, unknown>).canvas_courses as Record<string, string> | null;
+              const code = cc?.course_code || "";
+              const dueStr = i.due_at ? new Date(i.due_at).toLocaleDateString() : "";
+              ctx += `  - ${code}: ${i.title} — due ${dueStr} [${i.item_type}]\n`;
+            }
+          }
+          ctx += `\nThe user is a college student. Respect class times and suggest study blocks before exams.`;
+          setAcademicContext(ctx);
+        }).catch(() => {});
+      })
+      .catch(() => {});
+  }, [user, supabase]);
 
   // Keep sessionStorage snapshot + localStorage fallback in sync
   useEffect(() => {
@@ -233,7 +278,7 @@ export default function HomePage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content, events, imageBase64, today: new Date().toISOString().split("T")[0] }),
+        body: JSON.stringify({ message: content, events, imageBase64, today: new Date().toISOString().split("T")[0], academicContext }),
       });
 
       const data = await res.json();

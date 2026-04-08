@@ -1,10 +1,12 @@
+export type EventColor = "green" | "blue" | "orange" | "red" | "purple" | "gray" | "teal" | "yellow" | "pink";
+
 export interface CalendarEvent {
   id: string;
   title: string;
   date: string; // ISO date string YYYY-MM-DD
   startTime: string; // HH:MM
   endTime: string; // HH:MM
-  color: "green" | "blue" | "orange" | "red" | "purple" | "gray" | "teal" | "yellow" | "pink";
+  color: EventColor;
   allDay?: boolean;
   location?: { name: string; lat: number; lng: number };
 }
