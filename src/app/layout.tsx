@@ -30,6 +30,7 @@ const pacifico = Pacifico({
 export const metadata: Metadata = {
   title: "Noted — Your AI Calendar",
   description: "An AI-powered calendar that builds your schedule through conversation.",
+  viewport: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover",
 };
 
 export default function RootLayout({

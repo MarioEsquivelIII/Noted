@@ -32,6 +32,9 @@ yarn-error.log*
 .env
 .env*.local
 
+# canvas playwright auth state (contains session cookies)
+.canvas-auth/
+
 # vercel
 .vercel
 

@@ -110,9 +110,13 @@ export default function MapView({ events, theme }: MapViewProps) {
     const map = mapRef.current;
     if (!map) return;
 
-    // Clear existing markers
+    // Clear existing markers and routes FIRST (before any async work)
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
+    if (map.getLayer("route")) map.removeLayer("route");
+    if (map.getSource("route")) map.removeSource("route");
+    setRouteDuration(null);
+    setIsWalkable(false);
 
     const dayEvents = getEventsForDate(events, selectedDate).filter((e) => e.location);
 
@@ -225,7 +229,7 @@ export default function MapView({ events, theme }: MapViewProps) {
   return (
     <div className="w-full h-full flex flex-col">
       {/* Date selector with week nav */}
-      <div className="flex items-center gap-2 px-4 py-2 flex-shrink-0">
+      <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 shrink-0 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
         <button
           onClick={() => setWeekOffsetState(weekOffsetState - 1)}
           className="p-2 rounded-lg transition-colors"
@@ -244,7 +248,7 @@ export default function MapView({ events, theme }: MapViewProps) {
             <button
               key={date}
               onClick={() => setSelectedDate(date)}
-              className="flex flex-col items-center px-3 py-2 rounded-xl transition-all min-w-[52px]"
+              className="flex flex-col items-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-all min-w-[40px] sm:min-w-[52px]"
               style={{
                 background: isSelected ? "var(--accent)" : "transparent",
                 border: isToday && !isSelected ? "1px solid var(--accent)" : "1px solid transparent",
@@ -287,9 +291,9 @@ export default function MapView({ events, theme }: MapViewProps) {
       </div>
 
       {/* Map + itinerary sidebar */}
-      <div className="flex-1 mx-4 mb-4 flex gap-0 rounded-2xl overflow-hidden" style={{ border: "1px solid var(--border-color)" }}>
-        {/* Left itinerary sidebar */}
-        <div className="w-72 flex-shrink-0 overflow-y-auto" style={{ background: "var(--bg-secondary)", borderRight: "1px solid var(--border-subtle)" }}>
+      <div className="flex-1 mx-2 sm:mx-4 mb-2 sm:mb-4 flex flex-col sm:flex-row gap-0 rounded-2xl overflow-hidden" style={{ border: "1px solid var(--border-color)" }}>
+        {/* Itinerary: collapses on mobile (short scroll), full sidebar on desktop */}
+        <div className="w-full sm:w-72 shrink-0 overflow-y-auto max-h-[25vh] sm:max-h-none border-b sm:border-b-0 sm:border-r" style={{ background: "var(--bg-secondary)", borderColor: "var(--border-subtle)" }}>
           <div className="p-4">
             <p className="text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>
               {new Date(selectedDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}

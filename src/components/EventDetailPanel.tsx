@@ -92,15 +92,16 @@ export default function EventDetailPanel({ event, position, onClose, onSave, onD
   };
   const mealSuggestions = mealSuggestionsMap[mealType] || [];
 
-  const panelWidth = 360;
-  const left = Math.min(position.x, window.innerWidth - panelWidth - 20);
-  const top = Math.min(Math.max(position.y - 100, 20), window.innerHeight - 500);
+  const isMobileView = typeof window !== "undefined" && window.innerWidth < 640;
+  const panelWidth = isMobileView ? Math.min(360, window.innerWidth - 24) : 360;
+  const left = isMobileView ? 12 : Math.min(position.x, window.innerWidth - panelWidth - 20);
+  const top = isMobileView ? 60 : Math.min(Math.max(position.y - 100, 20), window.innerHeight - 500);
 
   return (
     <div className="fixed inset-0 z-[90]" onClick={(e) => { if (e.target === e.currentTarget) { onSave({ ...event, title: title || event.title, startTime, endTime, date, color }); onClose(); } }}>
       <div
         ref={ref}
-        className="absolute rounded-2xl shadow-2xl overflow-hidden"
+        className="absolute rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] overflow-y-auto"
         style={{ left, top, width: panelWidth, background: "var(--card-bg)", border: "1px solid var(--border-color)" }}
       >
         {/* Header */}

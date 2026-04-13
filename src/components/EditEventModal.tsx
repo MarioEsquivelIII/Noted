@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { CalendarEvent } from "@/lib/events";
+import { CalendarEvent, type RecurrenceRule } from "@/lib/events";
+import RecurrencePicker from "./RecurrencePicker";
 
 interface EditEventModalProps {
   event: CalendarEvent;
@@ -15,6 +16,9 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
   const [startTime, setStartTime] = useState(event.startTime);
   const [endTime, setEndTime] = useState(event.endTime);
   const [color, setColor] = useState(event.color);
+  const [description, setDescription] = useState(event.description || "");
+  const [recurrenceRule, setRecurrenceRule] = useState<RecurrenceRule | null>(event.recurrenceRule || null);
+  const [showRecurrence, setShowRecurrence] = useState(!!event.recurrenceRule);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,7 +31,16 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ ...event, title, date, startTime, endTime, color });
+    onSave({
+      ...event,
+      title,
+      date,
+      startTime,
+      endTime,
+      color,
+      description: description || undefined,
+      recurrenceRule: recurrenceRule || undefined,
+    });
   };
 
   const colors: CalendarEvent["color"][] = ["green", "blue", "orange", "red", "purple", "gray", "teal", "yellow", "pink"];
@@ -45,12 +58,12 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: "var(--overlay-bg)", backdropFilter: "blur(4px)" }}>
-      <div ref={ref} className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--border-color)" }}>
-        <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+      <div ref={ref} className="w-[calc(100%-24px)] sm:w-full max-w-sm mx-3 sm:mx-4 rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" style={{ background: "var(--card-bg)", border: "1px solid var(--border-color)" }}>
+        <div className="px-5 py-4 flex-shrink-0" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
           <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Edit Event</h3>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4 overflow-y-auto flex-1" style={{ scrollbarWidth: "thin" }}>
           <div>
             <label className="block text-xs mb-1.5" style={{ color: "var(--text-muted)" }}>Title</label>
             <input
@@ -69,7 +82,7 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm transition-colors"
+              className="w-full px-3 py-2 rounded-lg text-sm transition-colors [color-scheme:dark]"
               style={{ background: "var(--bg-primary)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}
             />
           </div>
@@ -81,7 +94,7 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg text-sm transition-colors"
+                className="w-full px-3 py-2 rounded-lg text-sm transition-colors [color-scheme:dark]"
                 style={{ background: "var(--bg-primary)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}
               />
             </div>
@@ -91,12 +104,50 @@ export default function EditEventModal({ event, onSave, onClose }: EditEventModa
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg text-sm transition-colors"
+                className="w-full px-3 py-2 rounded-lg text-sm transition-colors [color-scheme:dark]"
                 style={{ background: "var(--bg-primary)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}
               />
             </div>
           </div>
 
+          {/* Description */}
+          <div>
+            <label className="block text-xs mb-1.5" style={{ color: "var(--text-muted)" }}>Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Add notes or details..."
+              rows={2}
+              className="w-full px-3 py-2 rounded-lg text-sm transition-colors resize-none"
+              style={{ background: "var(--bg-primary)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}
+            />
+          </div>
+
+          {/* Recurrence */}
+          <div>
+            {!showRecurrence ? (
+              <button
+                type="button"
+                onClick={() => setShowRecurrence(true)}
+                className="flex items-center gap-2 text-xs transition-colors"
+                style={{ color: "var(--accent)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 014-4h14" />
+                  <polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 01-4 4H3" />
+                </svg>
+                Add recurrence
+              </button>
+            ) : (
+              <RecurrencePicker
+                rule={recurrenceRule}
+                onChange={setRecurrenceRule}
+                eventDate={date}
+              />
+            )}
+          </div>
+
+          {/* Color */}
           <div>
             <label className="block text-xs mb-1.5" style={{ color: "var(--text-muted)" }}>Color</label>
             <div className="flex gap-2">

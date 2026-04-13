@@ -25,8 +25,8 @@ export default function ComingUp({ events, onContextMenu }: ComingUpProps) {
   });
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-5">
-      <h2 className="text-xl font-medium mb-5" style={{ color: "var(--text-primary)" }}>Coming up</h2>
+    <div className="w-full max-w-2xl mx-auto px-3 sm:px-5">
+      <h2 className="text-lg sm:text-xl font-medium mb-4 sm:mb-5" style={{ color: "var(--text-primary)" }}>Coming up</h2>
 
       <div className="space-y-2">
         {datesWithEvents.map((date) => {

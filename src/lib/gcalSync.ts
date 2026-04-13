@@ -12,6 +12,8 @@ export interface GcalApiEvent {
   id?: string;
   status?: string;
   summary?: string;
+  description?: string;
+  location?: string;
   start?: { dateTime?: string; date?: string; timeZone?: string };
   end?: { dateTime?: string; date?: string; timeZone?: string };
   colorId?: string;
@@ -69,11 +71,18 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
   if (!gid || raw.status === "cancelled") return [];
 
   const summary = raw.summary?.trim() || "(No title)";
+  const description = raw.description?.trim() || undefined;
+  const locationName = raw.location?.trim() || undefined;
   const start = raw.start;
   const end = raw.end;
   if (!start) return [];
 
   const eventColor = gcalColorToNoted(raw.colorId);
+
+  // Shared optional fields
+  const extras: Partial<CalendarEvent> = {};
+  if (description) extras.description = description;
+  if (locationName) extras.location = { name: locationName, lat: 0, lng: 0 };
 
   // All-day events: Google uses date (not dateTime) and end date is exclusive
   if (start.date && !start.dateTime) {
@@ -93,6 +102,7 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
         endTime: "23:59",
         color: eventColor,
         allDay: true,
+        ...extras,
       });
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -117,6 +127,7 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
         startTime: toHHMM(s),
         endTime: toHHMM(e),
         color: eventColor,
+        ...extras,
       }];
     }
 
@@ -138,6 +149,7 @@ export function parseGoogleEventToCalendarEvents(raw: GcalApiEvent): CalendarEve
         startTime: isFirst ? toHHMM(s) : "00:00",
         endTime: isLast ? toHHMM(e) : "23:59",
         color: eventColor,
+        ...extras,
       });
       cursor.setDate(cursor.getDate() + 1);
     }

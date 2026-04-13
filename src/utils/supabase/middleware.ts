@@ -29,20 +29,61 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const pathname = request.nextUrl.pathname;
+
   // Redirect unauthenticated users to login (except for login, auth, and api routes)
   if (
     !user &&
-    !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/signup") &&
-    !request.nextUrl.pathname.startsWith("/forgot-password") &&
-    !request.nextUrl.pathname.startsWith("/reset-password") &&
-    !request.nextUrl.pathname.startsWith("/auth") &&
-    !request.nextUrl.pathname.startsWith("/api") &&
-    request.nextUrl.pathname !== "/"
+    !pathname.startsWith("/login") &&
+    !pathname.startsWith("/signup") &&
+    !pathname.startsWith("/forgot-password") &&
+    !pathname.startsWith("/reset-password") &&
+    !pathname.startsWith("/auth") &&
+    !pathname.startsWith("/api") &&
+    !pathname.startsWith("/onboarding") &&
+    pathname !== "/"
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
+  }
+
+  // Redirect authenticated users to onboarding if they haven't completed it
+  // Skip for onboarding page itself, auth routes, API routes, and public pages
+  if (
+    user &&
+    !pathname.startsWith("/onboarding") &&
+    !pathname.startsWith("/auth") &&
+    !pathname.startsWith("/api") &&
+    !pathname.startsWith("/login") &&
+    !pathname.startsWith("/signup") &&
+    !pathname.startsWith("/forgot-password") &&
+    !pathname.startsWith("/reset-password") &&
+    pathname !== "/"
+  ) {
+    // Use a short-lived cookie to avoid querying the DB on every request
+    const onboardedCookie = request.cookies.get("noted_onboarded");
+    if (!onboardedCookie) {
+      const { data: profile } = await supabase
+        .from("user_profiles")
+        .select("onboarding_completed")
+        .eq("user_id", user.id)
+        .single();
+
+      if (!profile || !profile.onboarding_completed) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/onboarding";
+        return NextResponse.redirect(url);
+      }
+
+      // Profile exists and onboarding is complete — set cookie to skip future DB checks
+      supabaseResponse.cookies.set("noted_onboarded", "1", {
+        maxAge: 3600, // 1 hour
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+      });
+    }
   }
 
   return supabaseResponse;

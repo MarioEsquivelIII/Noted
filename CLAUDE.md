@@ -1,52 +1,37 @@
 # CLAUDE.md — Noted
 
-> AI-assisted weekly calendar companion. "You mention it. Noted builds it." The chat is your companion: share an idea, it updates your calendar — *Noted.*
-> Author: Mario A. Esquivel III | Hackathon prototype
+> AI-powered calendar builder for students. "You mention it. Noted builds it."
+> Author: Mario A. Esquivel III
 
 ---
 
-## Hackathon focus & Claude behavior
+## Scope rule — STRICT
 
-**Active priorities (in rough order):**
-1. Fixing bugs & polish
-2. Adding new features
-3. Supabase persistence for events
-4. AI/chat improvements
-
-**Scope rule — STRICT:** Only touch files and logic directly related to what was asked. Do not refactor nearby code, rename things, reorganize imports, or "clean up" anything that wasn't part of the request. If a change in an adjacent area is genuinely required to complete the task, call it out explicitly before making it.
+Only touch files and logic directly related to what was asked. Do not refactor nearby code, rename things, reorganize imports, or "clean up" anything that wasn't part of the request.
 
 ---
 
 ## Project overview
 
-Noted lets users describe their schedule in natural language (and optionally attach a photo), then generates a structured, editable weekly calendar from that input. Users can follow up in chat to add, move, or remove events without starting over.
+Noted is an AI calendar builder that learns who you are through onboarding, connects to your school's Canvas LMS, and uses that context to create personalized schedules. It supports natural language, image extraction, voice input, and smart scheduling that respects your study style, class times, and personal commitments.
 
 ---
 
-## Repo layout
+## Architecture
 
 ```
-Noted/                           ← app root (run all commands from here; clone may live under `Kronos/` on disk)
-├── src/
-│   ├── app/
-│   │   ├── api/chat/route.ts    ← OpenAI API route (core AI layer)
-│   │   ├── home/page.tsx        ← main experience: events state lives here
-│   │   ├── login/ signup/ …     ← auth pages
-│   │   └── account/page.tsx     ← profile + account deletion
-│   ├── components/
-│   │   ├── WeekCalendar.*       ← week grid with drag/resize/add
-│   │   ├── ComingUp.*           ← home view upcoming events list
-│   │   ├── ChatBar.*            ← expandable chat UI
-│   │   ├── EditEventModal.*     ← event editing
-│   │   └── EventContextMenu.*   ← right-click / long-press actions
-│   ├── lib/
-│   │   ├── events.ts            ← CalendarEvent type + sampleEvents
-│   │   ├── chat.ts              ← ChatMessage types, offline parse helpers
-│   │   └── theme.tsx            ← light/dark theme (localStorage: noted_theme)
-│   ├── middleware.ts             ← Supabase session refresh + route guards
-│   └── utils/supabase/          ← Supabase client/server/middleware helpers
-├── public/
-└── package.json
+Landing (/) → Signup → Onboarding (7 steps) → Home (/home)
+                                                  ├── Calendar tab (AI chat + events)
+                                                  ├── Overview tab (upcoming events)
+                                                  ├── Map tab (campus locations + routes)
+                                                  └── Home tab (about)
+
+Data flow:
+  Canvas Scraper → planner_items table → AI context
+  GT Scheduler (Banner 9) → class events with locations → events table
+  iCal feed → planner_items → merged with scraper data
+  Onboarding profile → personalContext → AI system prompt
+  User chat → /api/chat → JSON actions → calendar updates
 ```
 
 ---
@@ -55,99 +40,109 @@ Noted/                           ← app root (run all commands from here; clone
 
 | Layer | Tool |
 |---|---|
-| Framework | Next.js (App Router), React 19, TypeScript |
+| Framework | Next.js 16 (App Router), React 19, TypeScript 5 |
 | Styling | Tailwind CSS 4 |
-| Auth + DB | Supabase (`@supabase/supabase-js`, `@supabase/ssr`) |
-| AI | OpenAI SDK — `gpt-4o-mini` (text), `gpt-4o` (image input) |
-| State | React `useState` in `home/page.tsx` (in-memory, not persisted) |
+| Auth + DB | Supabase (RLS, per-user data) |
+| AI | OpenAI — `gpt-4o-mini` (text), `gpt-4o` (images) |
+| Maps | Mapbox GL JS |
+| Browser automation | Playwright (Canvas scraping) |
+| Validation | Zod |
 
 ---
 
-## Core data model (`src/lib/events.ts`)
+## Core data model
 
+### CalendarEvent (`src/lib/events.ts`)
 ```ts
-type EventColor = "blue" | "green" | "red" | "purple" | "orange" | "pink" | "yellow" | "teal";
-
 interface CalendarEvent {
   id: string;
   title: string;
-  date: string;        // YYYY-MM-DD
-  startTime: string;   // HH:MM (24h)
-  endTime: string;     // HH:MM (24h)
+  date: string;               // YYYY-MM-DD
+  startTime: string;          // HH:MM (24h)
+  endTime: string;
   color: EventColor;
   allDay?: boolean;
+  location?: { name: string; lat: number; lng: number };
+  description?: string;
+  recurrenceRule?: RecurrenceRule;
+  seriesId?: string;
+  isRecurrenceException?: boolean;
+  isProtected?: boolean;      // non-negotiable — immune to casual deletion
 }
 ```
 
-Events are initialized from `sampleEvents` on page load. **There is no database persistence for events yet** — all state lives in React memory.
+### OnboardingProfile (`src/lib/onboarding.ts`)
+Stores: user_type, school, major, study preferences, session style, peak productivity, time struggles, exercise habits, anchor events, and feature settings.
+
+### PlannerItem (`src/lib/planner/types.ts`)
+Canvas data normalized for scheduling: assignments, exams, class meetings with workload estimates and confidence scores.
 
 ---
 
-## AI layer (`src/app/api/chat/route.ts`)
+## Key systems
 
-The API route receives `{ message, events, imageBase64? }` and returns a streamed or JSON response containing an `actions` block.
+### Onboarding (`src/app/onboarding/page.tsx`)
+- 7 steps for students: Welcome → Anchor Events → Academic Info → Study Preferences → Challenges → Wellness → Canvas
+- 3 steps for non-students: Welcome → Anchor Events → Wellness
+- Auto-saves progress per step (survives tab close)
+- Stored in `user_profiles` table
 
-### Action format the model must return
+### Canvas Integration (`src/lib/planner/`)
+- **Playwright scraper** (`scraper/scraper.ts`): Uses Canvas internal JSON API with session cookies
+- **iCal parser** (`ical-parser.ts`): Parses Canvas calendar feed for accurate event times
+- **GT Scheduler** (`gt-scheduler.ts`): Fetches Banner 9 data for exact class locations/rooms/times (GT only)
+- **Lab picker** (`LabPickerModal.tsx`): Shows lab options for user to select their section
+- **Workload estimator** (`estimator.ts`): Heuristic-based effort estimation per assignment
+- **Scheduler** (`scheduler.ts`): Generates study blocks respecting preferences and protected events
 
-```json
-{
-  "actions": [
-    {
-      "type": "add",
-      "event": {
-        "id": "unique-id",
-        "title": "Team standup",
-        "date": "2026-03-30",
-        "startTime": "09:00",
-        "endTime": "09:30",
-        "color": "blue"
-      }
-    },
-    {
-      "type": "delete",
-      "eventId": "existing-id"
-    }
-  ]
-}
-```
+### Protected Events
+- Classes, anchor events, and user-marked events are `isProtected: true`
+- Cannot be deleted via AI chat or "delete all"
+- Protected events split overlapping regular events (`splitAroundProtected`)
 
-- The client in `home/page.tsx` parses this with a regex looking for a fenced JSON block.
-- **Move = delete + add** (no dedicated move action type).
-- Model selection: `gpt-4o-mini` by default; switches to `gpt-4o` when `imageBase64` is present.
+### AI Chat (`src/app/api/chat/route.ts`)
+- Conversation memory (last 20 messages)
+- Action types: add, delete, delete_all_unprotected, protect, unprotect, anchor_add, anchor_remove
+- recurrenceRule on add actions (expanded client-side)
+- Never shows raw JSON to user
 
----
+### Image Extraction (`src/app/api/extract/route.ts`)
+- Specialized GPT-4o prompt for structured data extraction
+- Returns candidates with confidence scores
+- ExtractionReview component for user confirmation
 
-## Auth & session model
+### Recurrence (`src/lib/recurrence.ts`)
+- Rules stored on master events, expanded at render time
+- Frequencies: daily, weekdays, weekly, biweekly, monthly, custom
 
-- Supabase handles auth. Middleware (`src/middleware.ts`) refreshes the session and redirects unauthenticated users away from protected routes.
-- **Fallback path:** when no Supabase session exists, the app reads/writes `localStorage` key `noted_user` for a lightweight guest user object.
-- Protected routes: everything except `/login`, `/signup`, `/forgot-password`, `/reset-password`, `/auth/callback`, `/`, and API routes.
-- Account page uses `supabase.auth.updateUser()` and mirrors changes to `localStorage` for the fallback path.
+### Settings (`src/lib/onboarding.ts` → UserSettings)
+Toggles: autoSyncCanvas, aiDirectCalendarAccess, showAnchorEventsOnCalendar, aiCanManageAnchors, includeWorkloadEstimates, voiceEnabled, voiceAutoSend
 
 ---
 
-## Known gaps & gotchas
+## Database tables
 
-| Area | Status |
+| Table | Purpose |
 |---|---|
-| Event persistence | ❌ In-memory only. `noted_events` key in localStorage is referenced in account deletion but never written on save. |
-| Zod validation | ❌ README mentions it; not in `package.json`. Don't add unless scoped. |
-| Anthropic SDK | ❌ README mentions it; only OpenAI is used in code. |
-| ESLint | ⚠️ ESLint 9 expects a flat config (`eslint.config.*`). `npm run lint` may fail. |
-| Recurring events | ❌ Not implemented. |
-| Google Calendar sync | ✅ Import via Account page (Supabase Google OAuth + merge/overwrite). |
+| `events` | Calendar events with RLS |
+| `user_profiles` | Onboarding, settings, anchor events, Canvas config |
+| `planner_items` | Canvas assignments, class meetings, syllabi |
 
 ---
 
-## Development commands
+## API routes
 
-```bash
-# from app root (`Noted/` or `Kronos/` depending on clone folder)
-npm install
-npm run dev       # starts on http://localhost:3000
-npm run build
-npm run lint      # may need eslint flat config fix first
-```
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/chat` | POST | AI conversation with calendar actions |
+| `/api/events` | CRUD | Event operations (respects protection) |
+| `/api/extract` | POST | Image → structured candidates |
+| `/api/profile` | GET/POST/PUT | User profile (upsert) |
+| `/api/planner/ingest` | POST | iCal + Canvas scrape + GT Scheduler |
+| `/api/planner/recommend` | POST | Generate work block suggestions |
+| `/api/planner/context` | GET | Rich AI context from planner data |
+| `/api/planner/expand-class` | POST | Expand class meeting into events |
+| `/api/gcal-export` | POST | Export to Google Calendar |
 
 ---
 
@@ -157,27 +152,26 @@ npm run lint      # may need eslint flat config fix first
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 OPENAI_API_KEY=
+NEXT_PUBLIC_MAPBOX_TOKEN=
 ```
 
-Place in project root `.env` or `.env.local`. Never commit this file.
+---
+
+## Development
+
+```bash
+npm install
+npx playwright install chromium
+npm run dev
+npm run build
+```
 
 ---
 
-## Coding conventions
+## Conventions
 
-- **TypeScript everywhere.** No `any` unless absolutely unavoidable; prefer explicit types.
-- **Tailwind for all styling.** No inline `style={{}}` objects except for dynamic values (e.g. computed pixel heights in the calendar grid).
-- **Server vs client components:** API routes and Supabase server helpers are server-only. Calendar UI components are all client (`"use client"`).
-- **Event IDs:** generate with `crypto.randomUUID()` or a timestamp-based string. Keep IDs stable once created.
-- **Date/time format:** always `YYYY-MM-DD` for dates and `HH:MM` (24-hour) for times. Do not use 12-hour strings in data — only in display labels.
-- **Color values:** must be one of the `EventColor` enum values. Don't pass raw hex to events.
-
----
-
-## What to keep in mind when making changes
-
-1. **Events state lives in `home/page.tsx`.** Pass events and setters down as props — don't reach into parent state from deep components.
-2. **The AI action parser uses regex on a fenced JSON block.** If you change the response format in the API route, update the client parser too.
-3. **Supabase clients differ by context.** Use `createClient` from `utils/supabase/server.ts` in Server Components / API routes, and `utils/supabase/client.ts` in client components.
-4. **`sampleEvents` is demo data.** It's a good reference for the expected shape but shouldn't be treated as real user data.
-5. **The fallback localStorage user is not a Supabase user.** Don't call Supabase user APIs on it — check for session first.
+- TypeScript, no `any`
+- Tailwind + CSS variables for theming
+- `YYYY-MM-DD` dates, `HH:MM` 24h times
+- Protected events: never delete without user confirmation
+- Event IDs via `generateId()`

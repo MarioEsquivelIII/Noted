@@ -28,6 +28,13 @@ export const GT_LOCATIONS: Record<string, { name: string; lat: number; lng: numb
   "cherry emerson": { name: "Cherry Emerson", lat: 33.7780, lng: -84.3968 },
   "boggs building": { name: "Boggs Building", lat: 33.7778, lng: -84.3975 },
   "ford es&t": { name: "Ford ES&T Building", lat: 33.7780, lng: -84.3958 },
+  "tech sq research": { name: "TSRB", lat: 33.7767, lng: -84.3893 },
+  tsrb: { name: "TSRB", lat: 33.7767, lng: -84.3893 },
+  "east architecture": { name: "East Architecture", lat: 33.7759, lng: -84.3952 },
+  "west architecture": { name: "West Architecture", lat: 33.7761, lng: -84.3960 },
+  "clough ug": { name: "Clough Commons", lat: 33.7773, lng: -84.3963 },
+  "klaus advanced": { name: "Klaus", lat: 33.7772, lng: -84.3928 },
+  "engineering science": { name: "Engineering Science & Mechanics", lat: 33.7738, lng: -84.3958 },
 };
 
 /** Resolve a location string against known campus locations */

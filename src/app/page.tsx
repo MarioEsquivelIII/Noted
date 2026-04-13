@@ -186,11 +186,11 @@ export default function LandingPage() {
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-5">
             {[
               {
-                title: "Natural language",
-                desc: "Describe your schedule in plain words. Noted understands context, recurrence, and priorities.",
+                title: "AI calendar assistant",
+                desc: "Talk to Noted like a friend. Add events, move meetings, build your entire week — all through natural conversation.",
                 icon: (
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
@@ -198,8 +198,26 @@ export default function LandingPage() {
                 ),
               },
               {
-                title: "Image import",
-                desc: "Snap a photo of a class schedule or meeting agenda. Noted reads it and creates your events.",
+                title: "Canvas LMS integration",
+                desc: "Connect your school's Canvas account. Noted imports your classes, assignments, labs, and deadlines automatically.",
+                icon: (
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+                  </svg>
+                ),
+              },
+              {
+                title: "Smart scheduling",
+                desc: "Noted knows your study style, productivity peaks, and deadlines. It suggests realistic work blocks — not just due dates.",
+                icon: (
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                  </svg>
+                ),
+              },
+              {
+                title: "Image extraction",
+                desc: "Upload a screenshot of a schedule, flyer, or syllabus. Noted extracts events with confidence scoring and lets you review before adding.",
                 icon: (
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
@@ -207,11 +225,20 @@ export default function LandingPage() {
                 ),
               },
               {
-                title: "Visual editing",
-                desc: "Drag, resize, and refine. Your calendar is always editable — by hand or by voice.",
+                title: "Campus map & routes",
+                desc: "See your classes on a real map with walking routes between buildings. Know exactly where to go and how long it takes.",
                 icon: (
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" />
+                  </svg>
+                ),
+              },
+              {
+                title: "Google Calendar sync",
+                desc: "Import from and export to Google Calendar. Keep everything in sync across your devices.",
+                icon: (
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 014-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 01-4 4H3" />
                   </svg>
                 ),
               },
@@ -258,10 +285,10 @@ export default function LandingPage() {
 
           <div className="space-y-6">
             {[
-              { step: "01", title: "Describe your schedule", desc: "Type or speak your ideal week in natural language. Upload a photo of a syllabus or timetable." },
-              { step: "02", title: "Noted generates it", desc: "AI parses your description and creates structured calendar events — dates, times, colors, recurrence." },
-              { step: "03", title: "Refine with follow-ups", desc: "Ask Noted to move, add, or remove events. No need to start over — just keep talking." },
-              { step: "04", title: "Edit visually", desc: "Drag, resize, and fine-tune events directly on your weekly calendar. It's yours to own." },
+              { step: "01", title: "Sign up & personalize", desc: "Create your account and tell Noted about yourself — your school, study style, productivity peaks, and personal commitments like workouts or prayer." },
+              { step: "02", title: "Connect your data", desc: "Link Canvas LMS to import your classes, labs, assignments, and deadlines. Noted pulls exact class times and locations from your school's registrar." },
+              { step: "03", title: "Let Noted build your schedule", desc: "Noted generates smart study blocks around your classes, respects your non-negotiable events, and spreads work before deadlines — not the night before." },
+              { step: "04", title: "Refine with conversation", desc: "Tell Noted to move events, add recurring items, or adjust your schedule. Upload a screenshot and it extracts events. Your calendar evolves with you." },
             ].map((item, i) => (
               <motion.div
                 key={item.step}

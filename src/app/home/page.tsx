@@ -10,12 +10,16 @@ import EventContextMenu from "@/components/EventContextMenu";
 import EditEventModal from "@/components/EditEventModal";
 import EventDetailPanel from "@/components/EventDetailPanel";
 import MapView from "@/components/MapView";
-import { CalendarEvent, generateId } from "@/lib/events";
+import { CalendarEvent, generateId, type RecurrenceRule, splitAroundProtected } from "@/lib/events";
+import { expandRecurrences, generateSeriesId } from "@/lib/recurrence";
 import { EVENTS_SNAPSHOT_KEY, GCAL_IMPORT_KEY } from "@/lib/gcalSync";
 import { CANVAS_IMPORT_KEY } from "@/lib/canvas/constants";
 import { resolveKnownLocation } from "@/lib/canvas/geocode";
 import { ChatMessage } from "@/lib/chat";
+import ExtractionReview from "@/components/ExtractionReview";
+import { type ExtractedCandidate } from "@/app/api/extract/route";
 import { useTheme } from "@/lib/theme";
+import { OnboardingProfile, buildPersonalizationPrompt, getUserSettings, type UserSettings } from "@/lib/onboarding";
 import { User } from "@supabase/supabase-js";
 
 const NOTED_FEEDBACK_FORM_URL = "https://forms.gle/SsLmAmPGHRCwnewL7";
@@ -40,10 +44,16 @@ export default function HomePage() {
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
   const [detailPanel, setDetailPanel] = useState<{ event: CalendarEvent; x: number; y: number } | null>(null);
   const [chatMode, setChatMode] = useState<"collapsed" | "floating" | "sidebar" | "fullscreen">("collapsed");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const isAuthenticatedRef = useRef(false);
   const eventsLoadedRef = useRef(false);
   const [academicContext, setAcademicContext] = useState<string | null>(null);
+  const [personalContext, setPersonalContext] = useState<string | null>(null);
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  const [extractionCandidates, setExtractionCandidates] = useState<unknown[] | null>(null);
+  const [extractionImageBase64, setExtractionImageBase64] = useState<string | null>(null);
+  const [extractionText, setExtractionText] = useState<string>("");
 
 
   // --- Auth + event loading ---
@@ -81,6 +91,19 @@ export default function HomePage() {
       );
       isAuthenticatedRef.current = true;
 
+      // Fetch onboarding profile for AI personalization + settings
+      try {
+        const profileRes = await fetch("/api/profile");
+        if (profileRes.ok) {
+          const { profile } = await profileRes.json();
+          if (profile) {
+            const prompt = buildPersonalizationPrompt(profile as OnboardingProfile);
+            if (prompt) setPersonalContext(prompt);
+            setUserSettings(getUserSettings(profile));
+          }
+        }
+      } catch { /* profile fetch failed, continue without personalization */ }
+
       // Check if there's a pending Google Calendar import — if so, use those events
       // instead of loading from Supabase (the import handler will persist them)
       const pendingImport = sessionStorage.getItem(GCAL_IMPORT_KEY);
@@ -116,20 +139,31 @@ export default function HomePage() {
           const parsed = JSON.parse(pendingCanvasImport);
           const imported: CalendarEvent[] = Array.isArray(parsed) ? parsed : parsed?.events;
           if (Array.isArray(imported) && imported.length > 0) {
-            // Merge with existing events rather than replacing
-            setEvents((prev) => {
-              const existingIds = new Set(prev.map((e) => e.id));
-              const newEvents = imported.filter((e) => !existingIds.has(e.id));
-              return [...prev, ...newEvents];
-            });
-            eventsLoadedRef.current = true;
+            // Load existing events FIRST, then merge new ones on top
+            let existingEvents: CalendarEvent[] = [];
             try {
-              await fetch("/api/events", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(imported),
-              });
-            } catch { /* persist failed, events still in local state */ }
+              const existingRes = await fetch("/api/events");
+              if (existingRes.ok) {
+                const existingData = await existingRes.json();
+                existingEvents = existingData.events || [];
+              }
+            } catch { /* continue with empty */ }
+
+            const existingIds = new Set(existingEvents.map((e) => e.id));
+            const newEvents = imported.filter((e) => !existingIds.has(e.id));
+            setEvents([...existingEvents, ...newEvents]);
+            eventsLoadedRef.current = true;
+
+            // Persist new events to Supabase
+            if (newEvents.length > 0) {
+              try {
+                await fetch("/api/events", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(newEvents),
+                });
+              } catch { /* persist failed, events still in local state */ }
+            }
             return;
           }
         } catch { /* parse failed, fall through to normal load */ }
@@ -156,47 +190,75 @@ export default function HomePage() {
   // Google Calendar imports are now handled inside the auth effect above
   // to avoid race conditions where Supabase loading overwrites imported events.
 
-  // Load Canvas academic context for AI planner
+  // Load academic context for AI planner (Canvas OAuth or iCal planner items)
   useEffect(() => {
     if (!isAuthenticatedRef.current) return;
+
+    // Try Canvas OAuth first (existing flow)
     fetch("/api/canvas/status")
       .then((r) => r.json())
       .then((data) => {
-        if (!data.connected) return;
-        // Build academic context from Canvas data via Supabase
-        const sb = createClient();
-        Promise.all([
-          sb.from("canvas_courses").select("course_code, name, color").eq("user_id", user?.id).eq("is_active", true),
-          sb.from("canvas_academic_items")
-            .select("title, item_type, due_at, canvas_courses(course_code)")
-            .eq("user_id", user?.id)
-            .eq("is_archived", false)
-            .not("due_at", "is", null)
-            .gte("due_at", new Date().toISOString())
-            .lte("due_at", new Date(Date.now() + 14 * 86400000).toISOString())
-            .order("due_at", { ascending: true })
-            .limit(20),
-        ]).then(([coursesRes, itemsRes]) => {
-          const courses = coursesRes.data || [];
-          const items = itemsRes.data || [];
-          if (courses.length === 0) return;
+        if (data.connected) {
+          // Build academic context from Canvas OAuth data via Supabase
+          const sb = createClient();
+          Promise.all([
+            sb.from("canvas_courses").select("course_code, name, color").eq("user_id", user?.id).eq("is_active", true),
+            sb.from("canvas_academic_items")
+              .select("title, item_type, due_at, canvas_courses(course_code)")
+              .eq("user_id", user?.id)
+              .eq("is_archived", false)
+              .not("due_at", "is", null)
+              .gte("due_at", new Date().toISOString())
+              .lte("due_at", new Date(Date.now() + 14 * 86400000).toISOString())
+              .order("due_at", { ascending: true })
+              .limit(20),
+          ]).then(([coursesRes, itemsRes]) => {
+            const courses = coursesRes.data || [];
+            const items = itemsRes.data || [];
+            if (courses.length === 0) return;
 
-          let ctx = `Academic context (from Canvas LMS — ${data.domain}):\n\nCurrent courses:\n`;
-          for (const c of courses) {
-            ctx += `  - ${c.course_code || c.name}\n`;
-          }
-          if (items.length > 0) {
-            ctx += `\nUpcoming deadlines (next 14 days):\n`;
-            for (const i of items) {
-              const cc = (i as Record<string, unknown>).canvas_courses as Record<string, string> | null;
-              const code = cc?.course_code || "";
-              const dueStr = i.due_at ? new Date(i.due_at).toLocaleDateString() : "";
-              ctx += `  - ${code}: ${i.title} — due ${dueStr} [${i.item_type}]\n`;
+            let ctx = `Academic context (from Canvas LMS — ${data.domain}):\n\nCurrent courses:\n`;
+            for (const c of courses) {
+              ctx += `  - ${c.course_code || c.name}\n`;
             }
-          }
-          ctx += `\nThe user is a college student. Respect class times and suggest study blocks before exams.`;
-          setAcademicContext(ctx);
-        }).catch(() => {});
+            if (items.length > 0) {
+              ctx += `\nUpcoming deadlines (next 14 days):\n`;
+              for (const i of items) {
+                const cc = (i as Record<string, unknown>).canvas_courses as Record<string, string> | null;
+                const code = cc?.course_code || "";
+                const dueStr = i.due_at ? new Date(i.due_at).toLocaleDateString() : "";
+                ctx += `  - ${code}: ${i.title} — due ${dueStr} [${i.item_type}]\n`;
+              }
+            }
+            ctx += `\nThe user is a college student. Respect class times and suggest study blocks before exams.`;
+            setAcademicContext(ctx);
+          }).catch(() => {});
+          return;
+        }
+
+        // Auto-sync Canvas data in the background (if enabled in settings)
+        if (!userSettings || userSettings.autoSyncCanvas) {
+          fetch("/api/planner/auth")
+            .then((r) => r.json())
+            .then((authData) => {
+              if (authData.authenticated) {
+                fetch("/api/planner/ingest", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ scrape: true }),
+                }).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+
+        // Load rich planner context (iCal + scraper data with descriptions, syllabi)
+        fetch("/api/planner/context")
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.context) setAcademicContext(data.context);
+          })
+          .catch(() => {});
       })
       .catch(() => {});
   }, [user, supabase]);
@@ -275,10 +337,49 @@ export default function HomePage() {
     setChatLoading(true);
 
     try {
+      // Route images through extraction pipeline first
+      if (imageBase64) {
+        try {
+          const extractRes = await fetch("/api/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageBase64, text: content, today: new Date().toISOString().split("T")[0] }),
+          });
+          const extractData = await extractRes.json();
+          if (extractData.candidates && extractData.candidates.length > 0) {
+            // Show extraction review — pause chat flow
+            setExtractionCandidates(extractData.candidates);
+            setExtractionImageBase64(imageBase64);
+            setExtractionText(content);
+            setChatLoading(false);
+
+            const assistantMsg: ChatMessage = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: `I found ${extractData.candidates.length} item${extractData.candidates.length !== 1 ? "s" : ""} in that image. Review them above and choose what to add to your calendar.`,
+              timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, assistantMsg]);
+            return;
+          }
+        } catch {
+          // Extraction failed — fall through to regular chat
+        }
+      }
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content, events, imageBase64, today: new Date().toISOString().split("T")[0], academicContext }),
+        body: JSON.stringify({
+          message: content,
+          events,
+          imageBase64,
+          today: new Date().toISOString().split("T")[0],
+          academicContext,
+          personalContext,
+          // Send recent chat history for conversation memory (last 20 messages)
+          history: messages.slice(-20).map((m) => ({ role: m.role, content: m.content })),
+        }),
       });
 
       const data = await res.json();
@@ -308,12 +409,41 @@ export default function HomePage() {
         const toAdd: CalendarEvent[] = [];
         const toDeleteIds: string[] = [];
 
+        // Handle bulk delete_all_unprotected FIRST
+        const hasBulkDelete = parsed.actions.some((a: { type: string }) => a.type === "delete_all_unprotected");
+        if (hasBulkDelete) {
+          setEvents((prev) => {
+            const kept = prev.filter((e) => e.isProtected);
+            const removed = prev.filter((e) => !e.isProtected);
+            for (const e of removed) toDeleteIds.push(e.id);
+            return kept;
+          });
+
+          // Persist bulk delete to API
+          if (isAuthenticatedRef.current) {
+            // Delete all non-protected events via API
+            for (const id of toDeleteIds) {
+              fetch(`/api/events?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+            }
+          }
+        }
+
+        // Handle individual actions (skip if bulk delete already handled)
+        if (!hasBulkDelete) {
         setEvents((prev) => {
           let updated = [...prev];
+
+          const protectedSkipped: string[] = [];
 
           for (const action of parsed.actions) {
             if (action.type === "delete") {
               if (action.id) {
+                // Check if event is protected
+                const target = updated.find((e) => e.id === action.id);
+                if (target?.isProtected) {
+                  protectedSkipped.push(target.title);
+                  continue; // skip — don't delete protected events
+                }
                 toDeleteIds.push(action.id);
                 updated = updated.filter((e) => e.id !== action.id);
               } else if (action.title) {
@@ -321,6 +451,10 @@ export default function HomePage() {
                 const dateFilter = action.date;
                 updated = updated.filter((e) => {
                   const match = e.title.toLowerCase().includes(titleLower) || titleLower.includes(e.title.toLowerCase());
+                  if (match && e.isProtected) {
+                    protectedSkipped.push(e.title);
+                    return true; // keep — protected
+                  }
                   if (dateFilter && match && e.date === dateFilter) {
                     toDeleteIds.push(e.id);
                     return false;
@@ -340,6 +474,7 @@ export default function HomePage() {
                 startTime: action.startTime,
                 endTime: action.endTime,
                 color: action.color || "green",
+                description: action.description || undefined,
               };
               if (action.location) {
                 const resolved = resolveLocation(action.location);
@@ -347,15 +482,96 @@ export default function HomePage() {
                   newEvent.location = resolved;
                 }
               }
+              // Handle protection flag from AI
+              if (action.isProtected) {
+                newEvent.isProtected = true;
+              }
+              // Handle recurrence rule from AI
+              if (action.recurrenceRule) {
+                const sid = generateSeriesId();
+                newEvent.seriesId = sid;
+                newEvent.recurrenceRule = action.recurrenceRule as RecurrenceRule;
+              }
               toAdd.push(newEvent);
             }
           }
 
+          // Append note about protected events that were skipped
+          if (protectedSkipped.length > 0) {
+            const names = protectedSkipped.map((n) => `"${n}"`).join(", ");
+            responseText += `\n\n*Note: ${names} ${protectedSkipped.length === 1 ? "is" : "are"} non-negotiable and can't be deleted. Remove the protection in Settings first, or ask me to remove the protection.*`;
+          }
+
           return [...updated, ...toAdd];
         });
+        } // end if (!hasBulkDelete)
 
-        // Persist to Supabase
-        if (isAuthenticatedRef.current) {
+        // Handle protect/unprotect actions
+        const protectActions = parsed.actions.filter(
+          (a: { type: string }) => a.type === "protect" || a.type === "unprotect"
+        );
+        if (protectActions.length > 0 && isAuthenticatedRef.current) {
+          for (const action of protectActions) {
+            const isProtect = action.type === "protect";
+            // Find event by id or title
+            const targetId = action.id;
+            const targetTitle = action.title?.toLowerCase();
+
+            setEvents((prev) => prev.map((e) => {
+              if (targetId && e.id === targetId) return { ...e, isProtected: isProtect };
+              if (targetTitle && e.title.toLowerCase().includes(targetTitle)) return { ...e, isProtected: isProtect };
+              return e;
+            }));
+
+            // Persist to DB
+            const target = events.find((e) =>
+              (targetId && e.id === targetId) || (targetTitle && e.title.toLowerCase().includes(targetTitle))
+            );
+            if (target) {
+              fetch("/api/events", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...target, isProtected: isProtect }),
+              }).catch(() => {});
+            }
+          }
+        }
+
+        // Handle anchor event actions (add/remove personal commitments)
+        const anchorActions = parsed.actions.filter(
+          (a: { type: string }) => a.type === "anchor_add" || a.type === "anchor_remove"
+        );
+        if (anchorActions.length > 0 && isAuthenticatedRef.current && (!userSettings || userSettings.aiCanManageAnchors)) {
+          // Load current anchor events from profile
+          fetch("/api/profile").then((r) => r.json()).then((profileData) => {
+            let anchors: { name: string; days: string[]; startTime: string; endTime: string; priority: string }[] = profileData.profile?.anchor_events || [];
+
+            for (const action of anchorActions) {
+              if (action.type === "anchor_add") {
+                // Remove existing with same name (update), then add
+                anchors = anchors.filter((a) => a.name.toLowerCase() !== (action.name || "").toLowerCase());
+                anchors.push({
+                  name: action.name,
+                  days: action.days || [],
+                  startTime: action.startTime || "09:00",
+                  endTime: action.endTime || "10:00",
+                  priority: action.priority || "high",
+                });
+              } else if (action.type === "anchor_remove") {
+                anchors = anchors.filter((a) => a.name.toLowerCase() !== (action.name || "").toLowerCase());
+              }
+            }
+
+            fetch("/api/profile", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ anchor_events: anchors }),
+            }).catch(() => {});
+          }).catch(() => {});
+        }
+
+        // Persist calendar events to Supabase (skip if bulk delete already handled it)
+        if (isAuthenticatedRef.current && !hasBulkDelete) {
           for (const id of toDeleteIds) {
             fetch(`/api/events?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
           }
@@ -404,14 +620,51 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-sky-gradient relative">
       {/* Floating glass navigation */}
-      <header className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-4xl">
-        <nav className="rounded-full px-5 h-14 flex items-center justify-between bg-white/10 backdrop-blur-md border border-white/20 shadow-lg shadow-black/5">
-          <div className="flex items-center gap-3">
-            <span className="font-logo text-xl" style={{ color: "var(--text-primary)" }}>Noted</span>
+      <header className="fixed top-2 sm:top-4 left-1/2 -translate-x-1/2 z-50 w-[98%] sm:w-[95%] max-w-4xl">
+        <nav className="rounded-full px-3 sm:px-5 h-11 sm:h-14 flex items-center justify-between bg-white/10 backdrop-blur-md border border-white/20 shadow-lg shadow-black/5">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="font-logo text-lg sm:text-xl" style={{ color: "var(--text-primary)" }}>Noted</span>
           </div>
 
-          {/* View toggle — pill switcher */}
-          <div className="flex items-center gap-0.5 rounded-full p-1 bg-white/5 border border-white/10">
+          {/* View toggle — custom dropdown on mobile, pills on desktop */}
+          {/* Mobile dropdown */}
+          <div className="relative sm:hidden">
+            <button
+              onClick={() => setMobileNavOpen(!mobileNavOpen)}
+              className="flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] font-semibold tracking-wide transition-all"
+              style={{ background: "var(--accent)", color: "white" }}
+            >
+              {tabs.find((t) => t.key === view)?.label}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" className={`transition-transform ${mobileNavOpen ? "rotate-180" : ""}`}><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            {mobileNavOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMobileNavOpen(false)} />
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 rounded-xl overflow-hidden shadow-2xl" style={{ background: "var(--card-bg)", border: "1px solid var(--border-color)", minWidth: "140px" }}>
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() => { setView(tab.key); setMobileNavOpen(false); }}
+                      className="w-full px-4 py-2.5 text-left text-[12px] font-medium transition-colors flex items-center gap-2"
+                      style={{
+                        color: view === tab.key ? "var(--accent)" : "var(--text-primary)",
+                        background: view === tab.key ? "rgba(124,158,108,0.1)" : "transparent",
+                      }}
+                      onMouseEnter={(e) => { if (view !== tab.key) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(e) => { if (view !== tab.key) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      {view === tab.key && (
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
+                      )}
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          {/* Desktop pills */}
+          <div className="hidden sm:flex items-center gap-0.5 rounded-full p-1 bg-white/5 border border-white/10">
             {tabs.map((tab) => (
               <button
                 key={tab.key}
@@ -464,7 +717,7 @@ export default function HomePage() {
 
       {/* ========== HOME TAB — About Noted ========== */}
       {view === "home" && (
-        <main className={`pt-24 pb-20 relative z-10 transition-all ${chatMode === "sidebar" ? "mr-100" : ""}`}>
+        <main className={`pt-16 sm:pt-24 pb-16 sm:pb-20 relative z-10 transition-all ${chatMode === "sidebar" ? "sm:mr-100" : ""}`}>
           <div className="max-w-3xl mx-auto px-5 space-y-16">
             {/* Hero welcome */}
             <div className="text-center pt-8">
@@ -614,7 +867,7 @@ export default function HomePage() {
 
       {/* ========== OVERVIEW TAB — Greeting + Coming Up ========== */}
       {view === "overview" && (
-        <main className={`pt-24 relative z-10 transition-all ${chatExpanded && chatMode !== "sidebar" ? "pb-[58vh]" : "pb-20"} ${chatMode === "sidebar" ? "mr-100" : ""}`}>
+        <main className={`pt-16 sm:pt-24 relative z-10 transition-all ${chatExpanded && chatMode !== "sidebar" ? "pb-[58vh]" : "pb-16 sm:pb-20"} ${chatMode === "sidebar" ? "sm:mr-100" : ""}`}>
           <div className="space-y-10">
             <div className="max-w-2xl mx-auto px-5">
               <div className="glass-card rounded-2xl p-6">
@@ -627,17 +880,25 @@ export default function HomePage() {
               </div>
             </div>
 
-            <ComingUp events={events} onContextMenu={handleContextMenu} />
+            <ComingUp events={splitAroundProtected(expandRecurrences(events, new Date().toISOString().split("T")[0], new Date(Date.now() + 28 * 86400000).toISOString().split("T")[0]))} onContextMenu={handleContextMenu} />
           </div>
         </main>
       )}
 
       {/* ========== CALENDAR TAB ========== */}
       {view === "calendar" && (
-        <div className={`flex flex-col pt-20 relative z-10 transition-all ${chatMode === "sidebar" ? "mr-100" : ""}`} style={{ height: "100vh" }}>
+        <div className={`flex flex-col pt-14 sm:pt-20 relative z-10 transition-all ${chatMode === "sidebar" ? "sm:mr-100" : ""}`} style={{ height: "100dvh" }}>
           <div className="flex-1 mx-4 mb-4 glass-card rounded-2xl overflow-hidden">
             <WeekCalendar
-              events={events}
+              events={(() => {
+                // Expand recurring events for the visible range (4 weeks from today)
+                const today = new Date();
+                const start = new Date(today);
+                start.setDate(start.getDate() - start.getDay()); // start of current week
+                const end = new Date(start);
+                end.setDate(end.getDate() + 28);
+                return splitAroundProtected(expandRecurrences(events, start.toISOString().split("T")[0], end.toISOString().split("T")[0]));
+              })()}
               onContextMenu={handleContextMenu}
               onAddEvent={handleAddEvent}
               onClickEvent={handleClickEvent}
@@ -650,20 +911,71 @@ export default function HomePage() {
 
       {/* ========== MAP TAB ========== */}
       {view === "map" && (
-        <div className={`flex flex-col pt-20 relative z-10 transition-all ${chatMode === "sidebar" ? "mr-100" : ""}`} style={{ height: "100vh" }}>
+        <div className={`flex flex-col pt-14 sm:pt-20 relative z-10 transition-all ${chatMode === "sidebar" ? "sm:mr-100" : ""}`} style={{ height: "100dvh" }}>
           <MapView events={events} theme={theme} />
         </div>
       )}
 
-      {/* Chat bar */}
-      <ChatBar
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        isExpanded={chatExpanded}
-        onToggleExpand={() => setChatExpanded(!chatExpanded)}
-        isLoading={chatLoading}
-        onModeChange={setChatMode}
-      />
+      {/* Extraction review panel (shown after image analysis) */}
+      {extractionCandidates && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] w-full max-w-lg px-4">
+          <ExtractionReview
+            candidates={extractionCandidates as ExtractedCandidate[]}
+            onConfirm={(confirmedEvents) => {
+              for (const ev of confirmedEvents) {
+                handleAddEvent(ev);
+              }
+              setExtractionCandidates(null);
+              const msg: ChatMessage = {
+                id: Date.now().toString(),
+                role: "assistant",
+                content: `Added ${confirmedEvents.length} event${confirmedEvents.length !== 1 ? "s" : ""} to your calendar.`,
+                timestamp: new Date(),
+              };
+              setMessages((prev) => [...prev, msg]);
+            }}
+            onChatFallback={async () => {
+              // Send the original image to regular chat
+              setExtractionCandidates(null);
+              if (extractionImageBase64) {
+                setChatLoading(true);
+                try {
+                  const res = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: extractionText, events, imageBase64: extractionImageBase64, today: new Date().toISOString().split("T")[0], academicContext, personalContext }),
+                  });
+                  const data = await res.json();
+                  const msg: ChatMessage = {
+                    id: Date.now().toString(),
+                    role: "assistant",
+                    content: data.response || "I couldn't process that image.",
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, msg]);
+                } catch {
+                  // ignore
+                } finally {
+                  setChatLoading(false);
+                }
+              }
+            }}
+            onCancel={() => setExtractionCandidates(null)}
+          />
+        </div>
+      )}
+
+      {/* Chat bar — only visible on calendar tab */}
+      {view === "calendar" && (
+        <ChatBar
+          messages={messages}
+          onSendMessage={handleSendMessage}
+          isExpanded={chatExpanded}
+          onToggleExpand={() => setChatExpanded(!chatExpanded)}
+          isLoading={chatLoading}
+          onModeChange={setChatMode}
+        />
+      )}
 
       {/* Context menu */}
       {contextMenu && (

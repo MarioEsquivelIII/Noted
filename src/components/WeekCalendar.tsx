@@ -324,18 +324,21 @@ export default function WeekCalendar({ events, onContextMenu, onAddEvent, onClic
   const handlePrev = () => setWeekOffset(weekOffset - 1);
   const handleNext = () => setWeekOffset(weekOffset + 1);
 
-  const colTemplate = `60px repeat(${displayDates.length}, 1fr)`;
+  // Responsive time column: 40px on mobile, 60px on desktop
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  const timeColWidth = isMobile ? 40 : 60;
+  const colTemplate = `${timeColWidth}px repeat(${displayDates.length}, 1fr)`;
   const weekdayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   return (
     <div className="w-full h-full flex flex-col">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 h-12 flex-shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between px-2 sm:px-4 h-12 flex-shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           {/* Today */}
           <button
             onClick={() => setWeekOffset(0)}
-            className="px-3.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors"
+            className="px-2 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-[13px] font-medium transition-colors"
             style={weekOffset === 0
               ? { background: "var(--accent)", color: "white" }
               : { border: "1px solid var(--border-color)", color: "var(--text-secondary)" }
@@ -355,7 +358,7 @@ export default function WeekCalendar({ events, onContextMenu, onAddEvent, onClic
           </div>
 
           {/* Month label */}
-          <h2 className="text-[17px] font-medium" style={{ color: "var(--text-primary)" }}>{monthLabel}</h2>
+          <h2 className="text-[14px] sm:text-[17px] font-medium" style={{ color: "var(--text-primary)" }}>{monthLabel}</h2>
         </div>
 
         <div className="flex items-center gap-2">
@@ -557,12 +560,12 @@ export default function WeekCalendar({ events, onContextMenu, onAddEvent, onClic
             {displayDates.map((date) => {
               const today = isToday(date);
               return (
-                <div key={date} className="py-2.5 text-center">
-                  <div className="text-[11px] uppercase tracking-wider mb-0.5" style={{ color: today ? "var(--accent)" : "var(--text-muted)", fontWeight: 500 }}>
+                <div key={date} className="py-1.5 sm:py-2.5 text-center">
+                  <div className="text-[9px] sm:text-[11px] uppercase tracking-wider mb-0.5" style={{ color: today ? "var(--accent)" : "var(--text-muted)", fontWeight: 500 }}>
                     {getDayName(date)}
                   </div>
                   <div
-                    className="inline-flex items-center justify-center w-9 h-9 rounded-full text-[15px] transition-all"
+                    className="inline-flex items-center justify-center w-7 h-7 sm:w-9 sm:h-9 rounded-full text-[13px] sm:text-[15px] transition-all"
                     style={today ? { background: "var(--accent)", color: "white", fontWeight: 600 } : { color: "var(--text-primary)", fontWeight: 400 }}
                   >
                     {getDayNumber(date)}
@@ -599,8 +602,8 @@ export default function WeekCalendar({ events, onContextMenu, onAddEvent, onClic
               {hours.map((hour) => (
                 <div key={hour} className="contents">
                   {/* Time label */}
-                  <div className="flex items-start justify-end pr-2 pt-0" style={{ height: `${HOUR_HEIGHT}px` }}>
-                    <span className="text-[11px] -mt-2 font-light" style={{ color: "var(--text-muted)" }}>
+                  <div className="flex items-start justify-end pr-1 sm:pr-2 pt-0" style={{ height: `${HOUR_HEIGHT}px` }}>
+                    <span className="text-[9px] sm:text-[11px] -mt-2 font-light" style={{ color: "var(--text-muted)" }}>
                       {hour === 0 ? "12 AM" : hour < 12 ? `${hour} AM` : hour === 12 ? "12 PM" : `${hour - 12} PM`}
                     </span>
                   </div>
