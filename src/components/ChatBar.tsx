@@ -476,8 +476,8 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
 
   const containerClass = (() => {
     switch (mode) {
-      case "sidebar": return "fixed top-[68px] right-3 bottom-3 w-[400px] z-50 flex flex-col rounded-2xl shadow-2xl overflow-hidden border";
-      case "floating": return "fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[600px] max-w-[90vw] h-[50vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden border";
+      case "sidebar": return "fixed inset-x-2 top-[52px] bottom-2 sm:inset-x-auto sm:top-[68px] sm:right-3 sm:bottom-3 sm:w-[400px] z-50 flex flex-col rounded-2xl shadow-2xl overflow-hidden border";
+      case "floating": return "fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[95vw] sm:w-[600px] sm:max-w-[90vw] h-[60vh] sm:h-[50vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden border";
       default: return "";
     }
   })();
@@ -546,7 +546,7 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
 
   // ========== COLLAPSED MODE — compact floating pill ==========
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50" onMouseEnter={handleBarMouseEnter} onMouseLeave={handleBarMouseLeave}>
+    <div className="fixed bottom-2 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 w-[95vw] sm:w-auto" onMouseEnter={handleBarMouseEnter} onMouseLeave={handleBarMouseLeave}>
       {/* Image previews above collapsed pill */}
       {imagePreviews.length > 0 && (
         <div className="flex gap-2 justify-center mb-2">
@@ -574,7 +574,7 @@ export default function ChatBar({ messages, onSendMessage, isExpanded, onToggleE
         ))}
       </div>
       <form onSubmit={handleSubmit} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 shadow-lg glass-card">
-        <input ref={inputRef} type="text" value={input} onChange={(e) => setInput(e.target.value)} onPaste={handlePaste} placeholder="What do you have planned today?" className="bg-transparent text-sm outline-none w-64" style={{ color: "var(--text-primary)" }} />
+        <input ref={inputRef} type="text" value={input} onChange={(e) => setInput(e.target.value)} onPaste={handlePaste} placeholder="What do you have planned today?" className="bg-transparent text-sm outline-none flex-1 min-w-0" style={{ color: "var(--text-primary)" }} />
         <div className="flex items-center gap-0.5">
           <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1 rounded-full transition-colors" title="Upload image (schedule, screenshot)">

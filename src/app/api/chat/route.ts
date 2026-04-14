@@ -7,7 +7,7 @@ const openai = new OpenAI({
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, events, imageBase64, today: clientToday } = await req.json();
+    const { message, events, imageBase64, today: clientToday, academicContext, personalContext, history } = await req.json();
 
     const eventsContext = events
       .map(
@@ -73,11 +73,22 @@ For MOVE/RESCHEDULE actions (e.g. "move dinner to 8 PM", "switch gym to morning"
   Example: {"actions": [{"type": "delete", "id": "old_event_id"}, {"type": "add", "title": "Dinner", "date": "2026-03-25", "startTime": "20:00", "endTime": "21:00", "color": "orange"}]}
 
 RECURRING / REPEATED EVENTS:
-When the user wants events that repeat (e.g. "every Wednesday for 4 weeks", "gym every weekday", "daily standup"), use type "recurring" instead of creating individual add actions:
-  {"type": "recurring", "title": "Event Name", "daysOfWeek": ["Wednesday"], "weeks": 4, "startTime": "HH:MM", "endTime": "HH:MM", "color": "green"}
-- daysOfWeek: array of day names. E.g. ["Monday","Wednesday","Friday"] for MWF, or ["Monday","Tuesday","Wednesday","Thursday","Friday"] for weekdays.
-- weeks: how many weeks to create events for (starting from this week).
-The system will automatically compute the correct dates — do NOT try to calculate dates yourself.
+When the user wants events that repeat, add a "recurrenceRule" field to the "add" action:
+  {"type": "add", "title": "Gym", "date": "YYYY-MM-DD", "startTime": "09:00", "endTime": "10:00", "color": "green", "recurrenceRule": {"frequency": "weekly", "daysOfWeek": ["Monday", "Wednesday", "Friday"], "endType": "never"}}
+
+Available frequencies: "daily", "weekdays", "weekly", "biweekly", "monthly", "custom"
+- "date" in the add action = the FIRST occurrence date (use DATE REFERENCE below to pick the right one)
+- "daysOfWeek": array of day names for weekly/biweekly/custom (e.g. ["Monday","Wednesday","Friday"])
+- "endType": "never" (repeats forever), "date" (with "endDate": "YYYY-MM-DD"), or "count" (with "endCount": number)
+- For "every weekday": use frequency "weekdays"
+- For "every 2 weeks": use frequency "biweekly" with daysOfWeek
+- For "every month": use frequency "monthly"
+
+Examples:
+- "gym every MWF" → recurrenceRule: {"frequency": "weekly", "daysOfWeek": ["Monday","Wednesday","Friday"], "endType": "never"}
+- "standup every weekday for 4 weeks" → recurrenceRule: {"frequency": "weekdays", "endType": "count", "endCount": 20}
+- "monthly review on the 15th" → recurrenceRule: {"frequency": "monthly", "dayOfMonth": 15, "endType": "never"}
+The system automatically expands recurring events on the calendar — do NOT create separate add actions for each date.
 
 SINGLE EVENTS WITH A DAY NAME (e.g. "next Thursday", "this Friday"):
 Today is ${todayDayName}, ${todayISO}.
@@ -93,7 +104,44 @@ For image uploads (schedule, class timetable, calendar screenshot):
 
 Match events by title when the user refers to them casually (e.g. "gym" matches "Morning Gym", "dinner" matches "Dinner").
 
-Keep responses concise and friendly. Use bullet points for listing events. Always include the JSON action block when creating/modifying events — the app parses it automatically. If no action is needed, just respond conversationally without a JSON block.`;
+ANCHOR EVENTS (non-negotiable personal commitments):
+The user can ask you to add, modify, or remove recurring personal commitments (workout, prayer, yoga, meal prep, etc.). Use these action types:
+  {"type": "anchor_add", "name": "Morning Workout", "days": ["Monday", "Wednesday", "Friday"], "startTime": "07:00", "endTime": "08:00", "priority": "high"}
+  {"type": "anchor_remove", "name": "Morning Workout"}
+- priority: "high" = never schedule over, "medium" = prefer to keep
+- days: array of day names (e.g. ["Monday", "Tuesday"])
+- These are saved to the user's profile and the scheduler will always protect them.
+- When the user says things like "I work out every morning at 7", "add prayer time on weekdays", "remove my yoga", use anchor actions.
+
+PROTECTED / NON-NEGOTIABLE EVENTS:
+Some events are marked as protected (non-negotiable). These include class times, important anchor events, medicine schedules, etc.
+- You CANNOT delete protected events.
+- When the user says "delete all events", "clear my calendar", "remove everything", etc., use this special bulk action:
+  {"type": "delete_all_unprotected"}
+  This will delete every non-protected event in one action. Do NOT list individual event IDs — just use this single action. Your visible response must be ONE short sentence ONLY, like: "Noted! All non-protected events have been deleted." Do NOT say "Here's the action I'll take" or explain what you're doing — just confirm it's done.
+- If the user tries to delete a SPECIFIC event that is protected, explain that it's non-negotiable and suggest they remove the protection first.
+- To add protection: {"type": "protect", "id": "event_id"} or {"type": "protect", "title": "Event Title"}
+- To remove protection: {"type": "unprotect", "id": "event_id"} or {"type": "unprotect", "title": "Event Title"}
+- IMPORTANT: Before removing protection, ALWAYS ask the user to confirm: "Are you sure you want to remove the protection from [event name]? This means it can be deleted or moved freely."
+- Only proceed with "unprotect" AFTER the user confirms.
+- When creating events for classes, workouts, medicine, prayer, or anything the user describes as "always", "every day", "non-negotiable", or "important", set isProtected: true on the add action:
+  {"type": "add", "title": "Morning Medicine", "date": "...", "startTime": "08:00", "endTime": "08:15", "color": "red", "isProtected": true}
+
+Keep responses concise and friendly. Use bullet points for listing events. Always include the JSON action block when creating/modifying events — the app parses it automatically. If no action is needed, just respond conversationally without a JSON block.
+
+CRITICAL FORMATTING RULE: Never show raw JSON to the user. The JSON action block goes in a fenced code block (the app strips it automatically). Your visible message must be short and natural — ONE or TWO sentences max. Examples:
+- Deleting: "Noted! All non-protected events have been deleted."
+- Adding: "Done! Added [event name] to your calendar."
+- Moving: "Moved [event] to [new time]."
+NEVER say "Here's the action I'll take", "Let me do that", or narrate what you're doing. Just confirm it's done. No IDs, no JSON, no action lists in your visible text.${
+  academicContext
+    ? `\n\n${academicContext}`
+    : ""
+}${
+  personalContext
+    ? `\n\n${personalContext}`
+    : ""
+}`;
 
     // Build message content — text only or text + image
     const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
@@ -115,75 +163,40 @@ Keep responses concise and friendly. Use bullet points for listing events. Alway
       }
     }
 
+    // Build conversation messages with history for memory
+    const conversationMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: "system", content: systemPrompt },
+    ];
+
+    // Add recent chat history (last 20 messages) for conversation continuity
+    if (Array.isArray(history)) {
+      for (const msg of history.slice(-20)) {
+        if (msg.role === "user" || msg.role === "assistant") {
+          conversationMessages.push({
+            role: msg.role as "user" | "assistant",
+            content: String(msg.content || ""),
+          });
+        }
+      }
+    }
+
+    // Add current user message
+    conversationMessages.push({
+      role: "user",
+      content: userContent.length > 0 ? userContent : message,
+    });
+
     const completion = await openai.chat.completions.create({
       model: imageBase64 ? "gpt-4o" : "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent.length > 0 ? userContent : message },
-      ],
+      messages: conversationMessages,
       temperature: 0.3,
       max_tokens: 2000,
     });
 
-    let responseText = completion.choices[0]?.message?.content || "Sorry, I couldn't process that. Try again?";
+    const responseText = completion.choices[0]?.message?.content || "Sorry, I couldn't process that. Try again?";
 
-    // Post-process: expand "recurring" actions into individual "add" actions
-    // using real JavaScript date math so dates are always correct.
-    const jsonPatterns = [
-      /```json\s*([\s\S]*?)```/,
-      /```\s*([\s\S]*?\{"actions"[\s\S]*?)```/,
-      /(\{"actions"\s*:\s*\[[\s\S]*\]\s*\})/,
-    ];
-
-    for (const pattern of jsonPatterns) {
-      const match = responseText.match(pattern);
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[1] || match[0]);
-          if (parsed?.actions) {
-            const expandedActions = [];
-            for (const action of parsed.actions) {
-              if (action.type === "recurring") {
-                const daysRequested: string[] = action.daysOfWeek || [];
-                const weeks: number = action.weeks || 4;
-                const dayNameToIndex: Record<string, number> = {
-                  "Sunday": 0, "Monday": 1, "Tuesday": 2, "Wednesday": 3,
-                  "Thursday": 4, "Friday": 5, "Saturday": 6,
-                };
-                // Collect all matching dates in the next N weeks
-                const totalDays = weeks * 7;
-                for (let i = 0; i < totalDays; i++) {
-                  const d = new Date(todayDate);
-                  d.setDate(d.getDate() + i);
-                  const dayIndex = d.getDay();
-                  const matchesDay = daysRequested.some(
-                    (name: string) => dayNameToIndex[name] === dayIndex
-                  );
-                  if (matchesDay) {
-                    expandedActions.push({
-                      type: "add",
-                      title: action.title,
-                      date: d.toISOString().split("T")[0],
-                      startTime: action.startTime,
-                      endTime: action.endTime,
-                      color: action.color || "green",
-                    });
-                  }
-                }
-              } else {
-                expandedActions.push(action);
-              }
-            }
-            // Replace the JSON block in the response with expanded actions
-            const expandedJson = JSON.stringify({ actions: expandedActions }, null, 2);
-            responseText = responseText.replace(match[0], "```json\n" + expandedJson + "\n```");
-          }
-        } catch {
-          // JSON parse failed, leave response as-is
-        }
-        break;
-      }
-    }
+    // No server-side expansion needed — recurring events are stored as rules
+    // and expanded client-side at render time by expandRecurrences()
 
     return NextResponse.json({ response: responseText });
   } catch (error: unknown) {
