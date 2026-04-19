@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { CalendarEvent, getEventsForDate, formatTime, getDayName, getDayNumber, getMonthName, isToday, generateId } from "@/lib/events";
+import { CalendarEvent, getEventsForDate, formatTime, getDayName, getDayNumber, getMonthName, isToday, generateId, toLocalDateStr } from "@/lib/events";
 
 type CalendarViewMode = "day" | "week" | "month";
 
@@ -126,7 +126,7 @@ function getMonthGridDates(year: number, month: number): string[] {
   for (let i = 0; i < 42; i++) {
     const d = new Date(startDate);
     d.setDate(startDate.getDate() + i);
-    dates.push(d.toISOString().split("T")[0]);
+    dates.push(toLocalDateStr(d));
   }
   return dates;
 }
@@ -141,14 +141,14 @@ function getDatesForView(viewMode: CalendarViewMode, numDays: number, offset: nu
     const dates: string[] = [];
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     for (let i = 1; i <= daysInMonth; i++) {
-      dates.push(new Date(year, month, i).toISOString().split("T")[0]);
+      dates.push(toLocalDateStr(new Date(year, month, i)));
     }
     return dates;
   }
   const today = new Date();
   if (viewMode === "day") {
     today.setDate(today.getDate() + offset);
-    return [today.toISOString().split("T")[0]];
+    return [toLocalDateStr(today)];
   }
   // Week view: find the Sunday of the current week, then apply week offset
   const dayOfWeek = today.getDay(); // 0=Sun
@@ -158,7 +158,7 @@ function getDatesForView(viewMode: CalendarViewMode, numDays: number, offset: nu
   for (let i = 0; i < numDays; i++) {
     const d = new Date(sunday);
     d.setDate(sunday.getDate() + i);
-    dates.push(d.toISOString().split("T")[0]);
+    dates.push(toLocalDateStr(d));
   }
   return dates;
 }
