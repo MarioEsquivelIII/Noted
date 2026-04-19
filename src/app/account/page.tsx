@@ -187,7 +187,7 @@ export default function AccountPage() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          scopes: "https://www.googleapis.com/auth/calendar.events",
+          scopes: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
           redirectTo: `${origin}/auth/callback`,
           queryParams: {
             access_type: "offline",

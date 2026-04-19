@@ -26,10 +26,17 @@ export interface CalendarEvent {
   isProtected?: boolean;           // non-negotiable — immune to casual deletion
 }
 
+export function toLocalDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function getDateStr(daysFromNow: number): string {
   const d = new Date();
   d.setDate(d.getDate() + daysFromNow);
-  return d.toISOString().split("T")[0];
+  return toLocalDateStr(d);
 }
 
 export function getEventsForDate(events: CalendarEvent[], date: string): CalendarEvent[] {
