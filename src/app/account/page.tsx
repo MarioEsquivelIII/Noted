@@ -297,6 +297,10 @@ export default function AccountPage() {
           accessToken={googleProviderToken}
           onClose={() => setGcalSyncOpen(false)}
           onImportComplete={onGcalImportComplete}
+          onReconnect={() => {
+            setGoogleProviderToken(null);
+            void handleGoogleCalConnect();
+          }}
         />
       )}
 

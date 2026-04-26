@@ -347,8 +347,16 @@ export async function fetchCalendarList(accessToken: string): Promise<GcalCalend
     if (!res.ok) {
       const msg = body?.error?.message || `HTTP ${res.status}`;
       console.error("[gcalSync] Calendar list API error:", res.status, msg);
-      if (res.status === 401) {
-        throw new Error("Google Calendar access token expired or invalid. Please reconnect your Google account.");
+      const isScopeIssue =
+        res.status === 403 && /insufficient|scope/i.test(msg);
+      if (res.status === 401 || isScopeIssue) {
+        const err = new Error(
+          isScopeIssue
+            ? "Google Calendar permissions need to be re-authorized."
+            : "Google Calendar access token expired or invalid. Please reconnect your Google account.",
+        );
+        (err as Error & { needsReconnect?: boolean }).needsReconnect = true;
+        throw err;
       }
       throw new Error(`Failed to load calendars: ${msg}`);
     }
