@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/utils/supabase/server";
 import { parseCanvasICalFeed } from "@/lib/planner/ical-parser";
 import { classifyAndEstimate } from "@/lib/planner/estimator";
@@ -9,6 +10,12 @@ import { enrichWithGTScheduler } from "@/lib/planner/gt-scheduler";
 import { generateSeriesId } from "@/lib/recurrence";
 import { resolveKnownLocation } from "@/lib/canvas/geocode";
 import { generateId } from "@/lib/events";
+
+const ingestRequestSchema = z.object({
+  icalUrl: z.string().url().max(2_000).optional(),
+  canvasDomain: z.string().max(255).regex(/^[a-zA-Z0-9.\-/:]*$/).optional(),
+  scrape: z.boolean().optional(),
+});
 
 /**
  * POST /api/planner/ingest
@@ -30,8 +37,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json();
-  const { icalUrl, canvasDomain, scrape } = body;
+  const parsed = ingestRequestSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
+  }
+  const { icalUrl, canvasDomain, scrape } = parsed.data;
 
   // Save domain to user profile if provided
   if (canvasDomain) {

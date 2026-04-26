@@ -60,6 +60,17 @@ Instead of manually creating every time block, you describe what you need and No
 
 ---
 
+## Security
+
+- **Auth on every API route** — All `/api/*` endpoints verify the Supabase session server-side before doing anything. No unauthenticated access to chat, extraction, calendar, or planner data.
+- **Row-Level Security** — Enabled on every table (`events`, `user_profiles`, `planner_items`, Canvas tables). Policies restrict reads/writes to `auth.uid() = user_id`.
+- **Rate limiting** — In-memory limiter at [src/utils/rate-limit.ts](src/utils/rate-limit.ts), applied in middleware. 60 req/min for normal API routes, 10 req/min for expensive AI routes (`/api/chat`, `/api/extract`, `/api/planner/ingest`). Returns `429` with `Retry-After` and `X-RateLimit-*` headers.
+- **Input validation** — Zod schemas on all write endpoints (`/api/chat`, `/api/extract`, `/api/events`, `/api/planner/*`). Invalid bodies return `400` before reaching business logic.
+- **Security headers** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security` (HSTS), and a `Permissions-Policy` that limits camera/mic/geolocation to same-origin.
+- **Secrets stay server-side** — `OPENAI_API_KEY` is never exposed to the client. Only `NEXT_PUBLIC_*` vars (Supabase anon key, Mapbox token) reach the browser, which is by design.
+
+---
+
 ## Getting Started
 
 ### Prerequisites

@@ -1,13 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { z } from "zod";
+import { createClient } from "@/utils/supabase/server";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const chatRequestSchema = z.object({
+  message: z.string().max(10_000).optional(),
+  events: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    date: z.string(),
+    startTime: z.string(),
+    endTime: z.string(),
+    color: z.string(),
+    location: z.object({ name: z.string(), lat: z.number(), lng: z.number() }).optional(),
+  }).passthrough()).max(2000),
+  imageBase64: z.string().max(15_000_000).optional(),
+  today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  academicContext: z.string().max(20_000).optional(),
+  personalContext: z.string().max(20_000).optional(),
+  history: z.array(z.object({
+    role: z.enum(["user", "assistant", "system"]),
+    content: z.string().max(20_000),
+  })).max(100).optional(),
+});
+
 export async function POST(req: NextRequest) {
   try {
-    const { message, events, imageBase64, today: clientToday, academicContext, personalContext, history } = await req.json();
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const parsed = chatRequestSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
+    }
+    const { message, events, imageBase64, today: clientToday, academicContext, personalContext, history } = parsed.data;
 
     const eventsContext = events
       .map(
@@ -183,7 +216,7 @@ NEVER say "Here's the action I'll take", "Let me do that", or narrate what you'r
     // Add current user message
     conversationMessages.push({
       role: "user",
-      content: userContent.length > 0 ? userContent : message,
+      content: userContent.length > 0 ? userContent : (message ?? ""),
     });
 
     const completion = await openai.chat.completions.create({
