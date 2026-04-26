@@ -7,26 +7,10 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Only enforce message length; let OpenAI handle parsing everything else.
 const chatRequestSchema = z.object({
   message: z.string().max(10_000).optional(),
-  events: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    date: z.string(),
-    startTime: z.string(),
-    endTime: z.string(),
-    color: z.string(),
-    location: z.object({ name: z.string(), lat: z.number(), lng: z.number() }).optional(),
-  }).passthrough()).max(2000),
-  imageBase64: z.string().max(15_000_000).optional(),
-  today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  academicContext: z.string().max(20_000).optional(),
-  personalContext: z.string().max(20_000).optional(),
-  history: z.array(z.object({
-    role: z.enum(["user", "assistant", "system"]),
-    content: z.string().max(20_000),
-  })).max(100).optional(),
-});
+}).passthrough();
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,12 +24,21 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
     }
-    const { message, events, imageBase64, today: clientToday, academicContext, personalContext, history } = parsed.data;
+    const message = parsed.data.message;
+    const body = parsed.data as Record<string, unknown>;
+    const events = (Array.isArray(body.events) ? body.events : []) as Array<{
+      id?: string; title?: string; date?: string; startTime?: string; endTime?: string; color?: string;
+      location?: { name?: string };
+    }>;
+    const imageBase64 = typeof body.imageBase64 === "string" ? body.imageBase64 : undefined;
+    const clientToday = typeof body.today === "string" ? body.today : undefined;
+    const academicContext = typeof body.academicContext === "string" ? body.academicContext : undefined;
+    const personalContext = typeof body.personalContext === "string" ? body.personalContext : undefined;
+    const history = Array.isArray(body.history) ? body.history : undefined;
 
     const eventsContext = events
-      .map(
-        (e: { id: string; title: string; date: string; startTime: string; endTime: string; color: string; location?: { name: string; lat: number; lng: number } }) =>
-          `- [id:${e.id}] "${e.title}" on ${e.date} from ${e.startTime} to ${e.endTime} (${e.color})${e.location ? ` @ ${e.location.name}` : ""}`
+      .map((e) =>
+        `- [id:${e.id}] "${e.title}" on ${e.date} from ${e.startTime} to ${e.endTime} (${e.color})${e.location ? ` @ ${e.location.name}` : ""}`
       )
       .join("\n");
 
