@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { z } from "zod";
+import { createClient } from "@/utils/supabase/server";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const extractRequestSchema = z.object({
+  imageBase64: z.string().min(1).max(15_000_000),
+  text: z.string().max(5_000).optional(),
+  today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
 
 /** Structured candidate extracted from an image */
 export interface ExtractedCandidate {
@@ -29,11 +37,17 @@ export interface ExtractedCandidate {
  */
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, text, today } = await req.json();
-
-    if (!imageBase64) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const parsed = extractRequestSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
+    }
+    const { imageBase64, text, today } = parsed.data;
 
     const todayStr = today || new Date().toISOString().split("T")[0];
 

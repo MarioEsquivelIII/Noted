@@ -1,5 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/utils/supabase/server";
+
+const eventInputSchema = z.object({
+  id: z.string().min(1).max(200),
+  title: z.string().min(1).max(500),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  color: z.string().max(50).optional(),
+  allDay: z.boolean().optional(),
+  location: z.object({
+    name: z.string().max(500),
+    lat: z.number().optional(),
+    lng: z.number().optional(),
+  }).passthrough().optional(),
+  description: z.string().max(5_000).optional(),
+  recurrenceRule: z.unknown().optional(),
+  recurrence_rule: z.unknown().optional(),
+  seriesId: z.string().max(200).optional(),
+  series_id: z.string().max(200).optional(),
+  isRecurrenceException: z.boolean().optional(),
+  is_recurrence_exception: z.boolean().optional(),
+  isProtected: z.boolean().optional(),
+  is_protected: z.boolean().optional(),
+}).passthrough();
+
+const eventsPostSchema = z.union([eventInputSchema, z.array(eventInputSchema).max(10_000)]);
+
+const eventPutSchema = eventInputSchema;
 
 // GET /api/events — fetch all events for the authenticated user
 export async function GET() {
@@ -55,8 +86,11 @@ export async function POST(req: NextRequest) {
 
   const replaceAll = req.nextUrl.searchParams.get("replaceAll") === "1";
 
-  const body = await req.json();
-  const items: Array<Record<string, unknown>> = Array.isArray(body) ? body : [body];
+  const parsed = eventsPostSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
+  }
+  const items: Array<Record<string, unknown>> = Array.isArray(parsed.data) ? parsed.data : [parsed.data];
 
   const rows = items.map((e) => ({
     id: e.id as string,
@@ -103,7 +137,25 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const e = await req.json();
+  const parsedPut = eventPutSchema.safeParse(await req.json());
+  if (!parsedPut.success) {
+    return NextResponse.json({ error: "Invalid request", details: parsedPut.error.issues }, { status: 400 });
+  }
+  const e = parsedPut.data as Record<string, unknown> & {
+    id: string;
+    title: string;
+    date: string;
+    startTime?: string;
+    endTime?: string;
+    color?: string;
+    allDay?: boolean;
+    location?: { name?: string; lat?: number; lng?: number };
+    description?: string;
+    recurrenceRule?: unknown;
+    seriesId?: string;
+    isRecurrenceException?: boolean;
+    isProtected?: boolean;
+  };
 
   const { error } = await supabase
     .from("events")

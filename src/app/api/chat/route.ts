@@ -1,18 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { z } from "zod";
+import { createClient } from "@/utils/supabase/server";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Only enforce message length; let OpenAI handle parsing everything else.
+const chatRequestSchema = z.object({
+  message: z.string().max(10_000).optional(),
+}).passthrough();
+
 export async function POST(req: NextRequest) {
   try {
-    const { message, events, imageBase64, today: clientToday, academicContext, personalContext, history } = await req.json();
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const parsed = chatRequestSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
+    }
+    const message = parsed.data.message;
+    const body = parsed.data as Record<string, unknown>;
+    const events = (Array.isArray(body.events) ? body.events : []) as Array<{
+      id?: string; title?: string; date?: string; startTime?: string; endTime?: string; color?: string;
+      location?: { name?: string };
+    }>;
+    const imageBase64 = typeof body.imageBase64 === "string" ? body.imageBase64 : undefined;
+    const clientToday = typeof body.today === "string" ? body.today : undefined;
+    const academicContext = typeof body.academicContext === "string" ? body.academicContext : undefined;
+    const personalContext = typeof body.personalContext === "string" ? body.personalContext : undefined;
+    const history = Array.isArray(body.history) ? body.history : undefined;
 
     const eventsContext = events
-      .map(
-        (e: { id: string; title: string; date: string; startTime: string; endTime: string; color: string; location?: { name: string; lat: number; lng: number } }) =>
-          `- [id:${e.id}] "${e.title}" on ${e.date} from ${e.startTime} to ${e.endTime} (${e.color})${e.location ? ` @ ${e.location.name}` : ""}`
+      .map((e) =>
+        `- [id:${e.id}] "${e.title}" on ${e.date} from ${e.startTime} to ${e.endTime} (${e.color})${e.location ? ` @ ${e.location.name}` : ""}`
       )
       .join("\n");
 
@@ -183,7 +209,7 @@ NEVER say "Here's the action I'll take", "Let me do that", or narrate what you'r
     // Add current user message
     conversationMessages.push({
       role: "user",
-      content: userContent.length > 0 ? userContent : message,
+      content: userContent.length > 0 ? userContent : (message ?? ""),
     });
 
     const completion = await openai.chat.completions.create({
