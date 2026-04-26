@@ -187,7 +187,7 @@ export default function AccountPage() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          scopes: "https://www.googleapis.com/auth/calendar.events",
+          scopes: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
           redirectTo: `${origin}/auth/callback`,
           queryParams: {
             access_type: "offline",
@@ -981,37 +981,6 @@ export default function AccountPage() {
                 </div>
               </button>
             ))}
-          </div>
-        </div>
-
-        {/* Preferences */}
-        <div className="glass-card rounded-2xl overflow-hidden">
-          <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--glass-border)" }}>
-            <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Preferences</h2>
-          </div>
-          <div className="px-6 py-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm" style={{ color: "var(--text-primary)" }}>Default view</p>
-                <p className="text-xs" style={{ color: "var(--text-muted)" }}>What you see when you open Noted</p>
-              </div>
-              <select className="px-3 py-1.5 rounded-xl text-xs [color-scheme:dark]"
-                style={{ background: "var(--bg-surface)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
-                <option>Home</option>
-                <option>Calendar</option>
-              </select>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm" style={{ color: "var(--text-primary)" }}>Week starts on</p>
-                <p className="text-xs" style={{ color: "var(--text-muted)" }}>First day of the week</p>
-              </div>
-              <select className="px-3 py-1.5 rounded-xl text-xs [color-scheme:dark]"
-                style={{ background: "var(--bg-surface)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
-                <option>Sunday</option>
-                <option>Monday</option>
-              </select>
-            </div>
           </div>
         </div>
 
