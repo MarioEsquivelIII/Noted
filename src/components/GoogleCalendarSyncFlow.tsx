@@ -23,6 +23,7 @@ interface GoogleCalendarSyncFlowProps {
   accessToken: string;
   onClose: () => void;
   onImportComplete: (events: CalendarEvent[], strategy?: "overwrite" | "merge") => void;
+  onReconnect?: () => void;
 }
 
 export default function GoogleCalendarSyncFlow({
@@ -30,7 +31,9 @@ export default function GoogleCalendarSyncFlow({
   accessToken,
   onClose,
   onImportComplete,
+  onReconnect,
 }: GoogleCalendarSyncFlowProps) {
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const [step, setStep] = useState<Step>("range");
   const [preset, setPreset] = useState<RangePreset>("this_week");
   const [customStart, setCustomStart] = useState("");
@@ -87,7 +90,9 @@ export default function GoogleCalendarSyncFlow({
       setSelectedCalendarIds(new Set(calendars.map((c) => c.id)));
       setStep("calendars");
     } catch (e) {
-      setFetchError(e instanceof Error ? e.message : "Failed to load calendar list.");
+      const err = e as Error & { needsReconnect?: boolean };
+      setNeedsReconnect(Boolean(err.needsReconnect));
+      setFetchError(err.message || "Failed to load calendar list.");
       setStep("fetch_error");
     }
   };
@@ -328,37 +333,53 @@ export default function GoogleCalendarSyncFlow({
               >
                 Close
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep("range");
-                  setFetchError(null);
-                }}
-                className="rounded-lg border border-[#333] bg-[#2a2a2a] px-4 py-2 text-xs text-[#ccc]"
-              >
-                Change range
-              </button>
-              <button
-                type="button"
-                disabled={!lastBounds}
-                onClick={async () => {
-                  if (!lastBounds) return;
-                  setStep("fetching");
-                  setFetchError(null);
-                  try {
-                    const ids = selectedCalendarIds.size > 0 ? Array.from(selectedCalendarIds) : undefined;
-                    const events = await fetchGoogleCalendarEvents(accessToken, lastBounds.timeMin, lastBounds.timeMax, ids);
-                    setFetched(events);
-                    setStep("strategy");
-                  } catch (e) {
-                    setFetchError(e instanceof Error ? e.message : "Failed to load calendar.");
-                    setStep("fetch_error");
-                  }
-                }}
-                className="rounded-lg bg-[#5a8a4a] px-4 py-2 text-xs font-medium text-white hover:bg-[#6a9a5a] disabled:opacity-50"
-              >
-                Retry
-              </button>
+              {needsReconnect && onReconnect ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    document.cookie = "noted_google_token=; path=/; max-age=0; SameSite=Lax";
+                    onClose();
+                    onReconnect();
+                  }}
+                  className="rounded-lg bg-[#5a8a4a] px-4 py-2 text-xs font-medium text-white hover:bg-[#6a9a5a]"
+                >
+                  Reconnect Google
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep("range");
+                      setFetchError(null);
+                    }}
+                    className="rounded-lg border border-[#333] bg-[#2a2a2a] px-4 py-2 text-xs text-[#ccc]"
+                  >
+                    Change range
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!lastBounds}
+                    onClick={async () => {
+                      if (!lastBounds) return;
+                      setStep("fetching");
+                      setFetchError(null);
+                      try {
+                        const ids = selectedCalendarIds.size > 0 ? Array.from(selectedCalendarIds) : undefined;
+                        const events = await fetchGoogleCalendarEvents(accessToken, lastBounds.timeMin, lastBounds.timeMax, ids);
+                        setFetched(events);
+                        setStep("strategy");
+                      } catch (e) {
+                        setFetchError(e instanceof Error ? e.message : "Failed to load calendar.");
+                        setStep("fetch_error");
+                      }
+                    }}
+                    className="rounded-lg bg-[#5a8a4a] px-4 py-2 text-xs font-medium text-white hover:bg-[#6a9a5a] disabled:opacity-50"
+                  >
+                    Retry
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
