@@ -26,12 +26,18 @@ export async function buildPlannerContext(
     .eq("user_id", userId)
     .eq("is_archived", false)
     .order("due_at", { ascending: true })
-    .limit(200);
+    .limit(500);
 
   if (error || !rows || rows.length === 0) return null;
 
   const items: PlannerItem[] = rows.map(rowToPlannerItem);
   const now = new Date();
+
+  // Helper: detect syllabus items (stored with rawScraperData.type === "syllabus")
+  const isSyllabus = (i: PlannerItem) => {
+    const data = i.rawScraperData as Record<string, unknown> | undefined;
+    return data?.type === "syllabus";
+  };
 
   // Group by course
   const byCourse: Record<string, PlannerItem[]> = {};
@@ -71,12 +77,24 @@ export async function buildPlannerContext(
     }
   }
 
+  // ─── Syllabi (always included, untruncated up to storage cap) ───
+  const syllabi = items.filter((i) => isSyllabus(i) && i.description && i.description.length > 20);
+  if (syllabi.length > 0) {
+    ctx += "\n## Course syllabi\n";
+    for (const syl of syllabi) {
+      const course = syl.courseCode || syl.courseName || "";
+      ctx += `\n### ${course ? course + " — " : ""}Syllabus\n`;
+      ctx += `${syl.description}\n`;
+    }
+  }
+
   // ─── Assignment details (RAG context — descriptions, rubrics) ───
-  // Include descriptions for items the user is likely to ask about (upcoming + high-value)
-  const withDetails = items.filter((i) => i.description && i.description.length > 20);
+  // Include descriptions for items the user is likely to ask about (upcoming + high-value).
+  // Excludes syllabi since those got their own section above.
+  const withDetails = items.filter((i) => i.description && i.description.length > 20 && !isSyllabus(i));
   if (withDetails.length > 0) {
     ctx += "\n## Assignment details (for answering specific questions)\n";
-    // Limit to ~30 items to avoid context overflow, prioritize upcoming
+    // Prioritize upcoming + higher-points items, cap at 100 to balance depth vs token cost
     const sorted = [...withDetails].sort((a, b) => {
       const aFuture = a.dueAt && new Date(a.dueAt) > now ? 0 : 1;
       const bFuture = b.dueAt && new Date(b.dueAt) > now ? 0 : 1;
@@ -84,10 +102,10 @@ export async function buildPlannerContext(
       return (b.pointsPossible || 0) - (a.pointsPossible || 0);
     });
 
-    for (const item of sorted.slice(0, 30)) {
+    for (const item of sorted.slice(0, 100)) {
       const course = item.courseCode || item.courseName || "";
-      // Truncate long descriptions to keep context manageable
-      const desc = item.description!.length > 300 ? item.description!.slice(0, 300) + "..." : item.description!;
+      // Truncate to 1500 chars (5x previous) — most rubrics fit, longest ones get a tail snip
+      const desc = item.description!.length > 1500 ? item.description!.slice(0, 1500) + "..." : item.description!;
       ctx += `\n### ${course ? course + ": " : ""}${item.title}\n`;
       if (item.dueAt) ctx += `Due: ${new Date(item.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}\n`;
       if (item.pointsPossible) ctx += `Points: ${item.pointsPossible}\n`;
