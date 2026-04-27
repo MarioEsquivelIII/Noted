@@ -75,21 +75,41 @@ export default function SchoolCanvasPicker({ value, onChange }: SchoolCanvasPick
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by school name..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (results.length > 0) {
+                    selectSchool(results[0]);
+                  } else if (search.trim()) {
+                    // No matching school — fall back to custom domain
+                    const trimmed = search.trim();
+                    const domain = trimmed.includes(".") ? trimmed : `${trimmed.toLowerCase().replace(/\s+/g, "")}.instructure.com`;
+                    onChange(domain);
+                    setSelectedName(trimmed);
+                    setOpen(false);
+                    setSearch("");
+                  }
+                } else if (e.key === "Escape") {
+                  setOpen(false);
+                }
+              }}
+              placeholder="Search by school name (Enter to select)..."
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={{ background: "var(--bg-primary)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}
               autoFocus
             />
           </div>
           <div className="max-h-48 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
-            {results.map((school) => (
+            {results.map((school, idx) => (
               <button
                 key={school.domain}
                 type="button"
                 onClick={() => selectSchool(school)}
-                className="w-full px-3.5 py-2.5 text-left transition-colors hover:bg-white/5"
+                className={`w-full px-3.5 py-2.5 text-left transition-colors hover:bg-white/5 ${idx === 0 && search ? "bg-white/5" : ""}`}
               >
-                <span className="text-xs block" style={{ color: "var(--text-primary)" }}>{school.name}</span>
+                <span className="text-xs block" style={{ color: "var(--text-primary)" }}>
+                  {school.name}{idx === 0 && search ? <span className="ml-2 text-[9px]" style={{ color: "var(--accent)" }}>↵ Enter</span> : null}
+                </span>
                 <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{school.domain}</span>
               </button>
             ))}

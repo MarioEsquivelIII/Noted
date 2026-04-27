@@ -10,6 +10,7 @@ import { GCAL_IMPORT_KEY } from "@/lib/gcalSync";
 import { CANVAS_IMPORT_KEY } from "@/lib/canvas/constants";
 import CanvasReviewPanel, { type PlannerItemSummary } from "@/components/CanvasReviewPanel";
 import LabPickerModal, { type LabGroup } from "@/components/LabPickerModal";
+import SchoolCanvasPicker from "@/components/SchoolCanvasPicker";
 import { type AnchorEvent, ANCHOR_EVENT_PRESETS, DAYS_OF_WEEK, type UserSettings, DEFAULT_SETTINGS, getUserSettings } from "@/lib/onboarding";
 
 export default function AccountPage() {
@@ -664,11 +665,17 @@ export default function AccountPage() {
                   ) : !plannerAuth && plannerStatus !== "scraping" && plannerStatus !== "done" ? (
                     <button
                       type="button"
-                      disabled={plannerStatus === "authenticating"}
+                      disabled={plannerStatus === "authenticating" || !plannerDomain}
+                      title={!plannerDomain ? "Pick your school first" : undefined}
                       onClick={async () => {
+                        if (!plannerDomain) {
+                          setPlannerError("Pick your school below first.");
+                          return;
+                        }
                         setPlannerStatus("authenticating");
                         setPlannerError(null);
                         try {
+                          // Note: /api/planner/auth saves the domain to the profile on success
                           const res = await fetch("/api/planner/auth", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
@@ -698,6 +705,14 @@ export default function AccountPage() {
                   )}
                 </div>
               </div>
+
+              {/* School picker — shown when no domain is set yet (e.g. after Disconnect) */}
+              {!plannerAuth && !plannerDomain && plannerStatus !== "scraping" && plannerStatus !== "done" && (
+                <div className="pt-1">
+                  <p className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>Pick your school to connect Canvas:</p>
+                  <SchoolCanvasPicker value={plannerDomain} onChange={setPlannerDomain} />
+                </div>
+              )}
 
               {/* Progress bar during sync */}
               {plannerStatus === "scraping" && (
